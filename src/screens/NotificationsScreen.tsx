@@ -7,10 +7,14 @@ import { loadNotifications } from "../services/notificationsService";
 import { getView, saveView, setScrollOffset } from "../services/viewCache";
 import { getColors } from "../theme";
 import type { ThemeMode } from "../theme";
+import type { KeyEvent, KeySub } from "../types/events";
 import type { NotificationKind, Tweet, XNotification, XUser } from "../types/x";
 import { getAvatarColor } from "../utils/avatar";
 import { errorMessage } from "../utils/error";
+import { addKeyEventListener, removeKeyEventListener } from "../utils/keyEvents";
+import { scrollListByKey } from "../utils/listScroll";
 import { logger } from "../utils/logger";
+import { handleScrollTopSignal } from "../utils/scrollToTop";
 import { relativeTime } from "../utils/tweetFormat";
 import React, { Component } from "react";
 import {
@@ -31,6 +35,8 @@ export interface NotificationsProps {
 	onBack: (() => void) | null;
 	onOpenTweet: (tweet: Tweet) => void;
 	onOpenAuthor: (user: XUser) => void;
+	// Bumped by App when the Notifications tab is re-tapped; a change scrolls to top.
+	scrollTopSignal?: number;
 }
 
 interface NotificationsState {
@@ -61,6 +67,9 @@ export default class NotificationsScreen extends Component<NotificationsProps, N
 	_mounted: boolean;
 	_listRef: FlatList<XNotification> | null;
 	_restoreOffset: number;
+	// Current scroll offset + trackpad key subscription (Q20 touch-mouse scroll).
+	_scrollY: number;
+	_keySub: KeySub | null;
 
 	constructor(props: NotificationsProps) {
 		super(props);
@@ -76,6 +85,8 @@ export default class NotificationsScreen extends Component<NotificationsProps, N
 		this._mounted = false;
 		this._listRef = null;
 		this._restoreOffset = cached ? cached.scrollOffset : 0;
+		this._scrollY = this._restoreOffset;
+		this._keySub = null;
 		this._renderItem = this._renderItem.bind(this);
 		this._refresh = this._refresh.bind(this);
 	}
@@ -89,10 +100,19 @@ export default class NotificationsScreen extends Component<NotificationsProps, N
 		} else {
 			this._load(false);
 		}
+		const self = this;
+		this._keySub = addKeyEventListener(function (e: KeyEvent) {
+			self._scrollY = scrollListByKey(self._listRef, self._scrollY, e.action);
+		});
+	}
+
+	componentDidUpdate(prev: NotificationsProps): void {
+		handleScrollTopSignal(prev.scrollTopSignal, this.props.scrollTopSignal, this._listRef, CACHE_KEY);
 	}
 
 	componentWillUnmount(): void {
 		this._mounted = false;
+		removeKeyEventListener(this._keySub);
 	}
 
 	_restoreScroll(): void {
@@ -109,7 +129,8 @@ export default class NotificationsScreen extends Component<NotificationsProps, N
 	}
 
 	_onScroll = (e: { nativeEvent: { contentOffset: { y: number } } }): void => {
-		setScrollOffset(CACHE_KEY, e.nativeEvent.contentOffset.y);
+		this._scrollY = e.nativeEvent.contentOffset.y;
+		setScrollOffset(CACHE_KEY, this._scrollY);
 	};
 
 	async _load(isRefresh: boolean): Promise<void> {

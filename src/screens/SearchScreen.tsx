@@ -18,6 +18,8 @@ export interface SearchProps {
 	onOpenAuthor: (user: XUser) => void;
 	onReply: (tweet: Tweet) => void;
 	onQuote: (tweet: Tweet) => void;
+	// Bumped by App when the Search tab is re-tapped; forwarded to the results feed to scroll to top.
+	scrollTopSignal?: number;
 }
 
 interface SearchState {
@@ -124,6 +126,7 @@ export default class SearchScreen extends Component<SearchProps, SearchState> {
 						onOpenAuthor={this.props.onOpenAuthor}
 						onReply={this.props.onReply}
 						onQuote={this.props.onQuote}
+						scrollTopSignal={this.props.scrollTopSignal}
 						emptyText="No results."
 					/>
 				) : (

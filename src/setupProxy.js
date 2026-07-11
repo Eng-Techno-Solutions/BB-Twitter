@@ -68,6 +68,34 @@ module.exports = function (app) {
     )
   );
 
+  // Homepage HTML: /x-home → https://x.com/home. Source of the verification key +
+  // animation frames the x-client-transaction-id generator needs (clientTransaction.ts).
+  app.use(
+    '/x-home',
+    createProxyMiddleware(
+      Object.assign({}, common, {
+        target: 'https://x.com',
+        pathRewrite: function () {
+          return '/home';
+        }
+      })
+    )
+  );
+
+  // Twitter CDN: /x-abs/... → https://abs.twimg.com/... Serves the ondemand.s
+  // bundle that carries the key-byte indices for the transaction-id generator.
+  app.use(
+    '/x-abs',
+    createProxyMiddleware(
+      Object.assign({}, common, {
+        target: 'https://abs.twimg.com',
+        pathRewrite: function (path) {
+          return path.replace('/x-abs', '');
+        }
+      })
+    )
+  );
+
   // Media upload: /x-upload/... → https://upload.twitter.com/...
   app.use(
     '/x-upload',

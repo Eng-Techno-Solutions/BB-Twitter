@@ -86,7 +86,8 @@ export default class App extends Component<Props, State> {
 			mentionsOnly: false,
 			soundEnabled: true,
 			fontSize: "medium",
-			unreadNotifications: 0
+			unreadNotifications: 0,
+			scrollTopSignal: 0
 		};
 		this._backHandler = null;
 		this._badgeTimer = null;
@@ -312,10 +313,14 @@ export default class App extends Component<Props, State> {
 	selectTab = (tab: TabKey): void => {
 		// Opening Notifications clears the unread badge (you've seen them).
 		const unread = tab === "notifications" ? 0 : this.state.unreadNotifications;
+		// Re-tapping the tab you're already on (at its root) scrolls the feed to the
+		// top instead of doing nothing — bump the signal the active feed watches.
+		const isAtRoot = this.state.activeTab === tab && this.state.stack.length === 1;
 		this.setState({
 			activeTab: tab,
 			stack: [{ screen: TAB_SCREEN[tab], params: {} }],
-			unreadNotifications: unread
+			unreadNotifications: unread,
+			scrollTopSignal: isAtRoot ? this.state.scrollTopSignal + 1 : this.state.scrollTopSignal
 		});
 	};
 
@@ -373,6 +378,7 @@ export default class App extends Component<Props, State> {
 						onQuote={this._quote}
 						onCompose={this._compose}
 						onTabChange={this._changeHomeTab}
+						scrollTopSignal={state.scrollTopSignal}
 					/>
 				);
 			case "search":
@@ -385,6 +391,7 @@ export default class App extends Component<Props, State> {
 						onOpenAuthor={this._openAuthor}
 						onReply={this._reply}
 						onQuote={this._quote}
+						scrollTopSignal={state.scrollTopSignal}
 					/>
 				);
 			case "notifications":
@@ -395,6 +402,7 @@ export default class App extends Component<Props, State> {
 						onBack={backOnStack}
 						onOpenTweet={this._openTweet}
 						onOpenAuthor={this._openAuthor}
+						scrollTopSignal={state.scrollTopSignal}
 					/>
 				);
 			case "messages":
@@ -407,6 +415,7 @@ export default class App extends Component<Props, State> {
 						onOpenConversation={(conversation) => {
 							this.navigate("dmConversation", { conversation: conversation });
 						}}
+						scrollTopSignal={state.scrollTopSignal}
 					/>
 				);
 			case "dmConversation":
@@ -434,6 +443,7 @@ export default class App extends Component<Props, State> {
 						onOpenAuthor={this._openAuthor}
 						onReply={this._reply}
 						onQuote={this._quote}
+						scrollTopSignal={state.scrollTopSignal}
 						onSettings={() => {
 							this.navigate("settings", {});
 						}}

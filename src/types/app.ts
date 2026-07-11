@@ -42,6 +42,9 @@ export interface AppState {
 	soundEnabled: boolean;
 	fontSize: FontSizeKey;
 	unreadNotifications: number;
+	// Monotonic counter bumped when the active tab is re-tapped at its root; the
+	// active feed watches it to scroll back to the top.
+	scrollTopSignal: number;
 }
 
 export interface AppStyles {

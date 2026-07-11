@@ -28,6 +28,8 @@ export interface ProfileProps {
 	onOpenAuthor: (user: XUser) => void;
 	onReply: (tweet: Tweet) => void;
 	onQuote: (tweet: Tweet) => void;
+	// Bumped by App when the Profile tab is re-tapped; forwarded to the feed to scroll to top.
+	scrollTopSignal?: number;
 	onSettings?: () => void;
 }
 
@@ -204,6 +206,7 @@ export default class ProfileScreen extends Component<ProfileProps, ProfileState>
 					onOpenAuthor={this.props.onOpenAuthor}
 					onReply={this.props.onReply}
 					onQuote={this.props.onQuote}
+					scrollTopSignal={this.props.scrollTopSignal}
 					ListHeaderComponent={this._renderHeader()}
 					emptyText="Nothing here yet."
 				/>
@@ -250,7 +253,7 @@ const styles = StyleSheet.create<{
 		borderRadius: 18,
 		paddingHorizontal: 16,
 		paddingVertical: 7,
-		marginBottom: 6
+		marginBottom: -6,
 	},
 	followText: { fontSize: 14, fontWeight: "700" },
 	nameRow: { flexDirection: "row", alignItems: "center", marginTop: 8 },

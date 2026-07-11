@@ -8,10 +8,14 @@ import {
 	commitRetweet
 } from "../../services/engagementService";
 import { getView, patchView, saveView, setScrollOffset } from "../../services/viewCache";
-import { getColors } from "../../theme";
+import { getColors, getMessageFontSize } from "../../theme";
+import type { KeyEvent, KeySub } from "../../types/events";
 import type { TimelinePage, Tweet, XUser } from "../../types/x";
 import { errorMessage } from "../../utils/error";
+import { addKeyEventListener, removeKeyEventListener } from "../../utils/keyEvents";
+import { scrollListByKey } from "../../utils/listScroll";
 import { logger } from "../../utils/logger";
+import { handleScrollTopSignal } from "../../utils/scrollToTop";
 import { ErrorView } from "../ui";
 import RepostMenu from "./RepostMenu";
 import TweetItem from "./TweetItem";
@@ -32,6 +36,10 @@ export interface TweetListProps {
 	onQuote: (tweet: Tweet) => void;
 	ListHeaderComponent?: React.ReactElement | null;
 	emptyText?: string;
+	// Bumped by App when the active tab is re-tapped; a change scrolls to top.
+	scrollTopSignal?: number;
+	// Opt-in: translate Q20 trackpad up/down key events into list scrolling.
+	scrollWithKeys?: boolean;
 }
 
 interface TweetListState {
@@ -55,6 +63,10 @@ export default class TweetList extends Component<TweetListProps, TweetListState>
 	// FlatList ref + the offset to restore on a cache hit.
 	_listRef: FlatList<Tweet> | null;
 	_restoreOffset: number;
+	// Current scroll offset, tracked so trackpad key events scroll from it.
+	_scrollY: number;
+	// Q20 trackpad key-event subscription (only when scrollWithKeys is set).
+	_keySub: KeySub | null;
 
 	constructor(props: TweetListProps) {
 		super(props);
@@ -74,6 +86,8 @@ export default class TweetList extends Component<TweetListProps, TweetListState>
 		this._mounted = false;
 		this._listRef = null;
 		this._restoreOffset = cached ? cached.scrollOffset : 0;
+		this._scrollY = this._restoreOffset;
+		this._keySub = null;
 		this._renderItem = this._renderItem.bind(this);
 		this._keyExtractor = this._keyExtractor.bind(this);
 		this._onEndReached = this._onEndReached.bind(this);
@@ -89,10 +103,26 @@ export default class TweetList extends Component<TweetListProps, TweetListState>
 		} else {
 			this._initialLoad();
 		}
+		if (this.props.scrollWithKeys) {
+			const self = this;
+			this._keySub = addKeyEventListener(function (e: KeyEvent) {
+				self._scrollY = scrollListByKey(self._listRef, self._scrollY, e.action);
+			});
+		}
+	}
+
+	componentDidUpdate(prev: TweetListProps): void {
+		handleScrollTopSignal(
+			prev.scrollTopSignal,
+			this.props.scrollTopSignal,
+			this._listRef,
+			this.props.cacheKey
+		);
 	}
 
 	componentWillUnmount(): void {
 		this._mounted = false;
+		removeKeyEventListener(this._keySub);
 	}
 
 	_save(tweets: Tweet[], cursor?: string): void {
@@ -115,7 +145,8 @@ export default class TweetList extends Component<TweetListProps, TweetListState>
 	}
 
 	_onScroll = (e: { nativeEvent: { contentOffset: { y: number } } }): void => {
-		if (this.props.cacheKey) setScrollOffset(this.props.cacheKey, e.nativeEvent.contentOffset.y);
+		this._scrollY = e.nativeEvent.contentOffset.y;
+		if (this.props.cacheKey) setScrollOffset(this.props.cacheKey, this._scrollY);
 	};
 
 	async _initialLoad(): Promise<void> {
@@ -247,6 +278,7 @@ export default class TweetList extends Component<TweetListProps, TweetListState>
 			<TweetItem
 				tweet={info.item}
 				nowMs={this.state.nowMs}
+				fontSize={getMessageFontSize()}
 				onPress={this.props.onOpenTweet}
 				onPressAuthor={this.props.onOpenAuthor}
 				onReply={this.props.onReply}
@@ -312,6 +344,7 @@ export default class TweetList extends Component<TweetListProps, TweetListState>
 					data={tweets}
 					keyExtractor={this._keyExtractor}
 					renderItem={this._renderItem}
+					extraData={getMessageFontSize()}
 					ListHeaderComponent={this.props.ListHeaderComponent}
 					ListEmptyComponent={
 						<View style={{ padding: 40, alignItems: "center" }}>

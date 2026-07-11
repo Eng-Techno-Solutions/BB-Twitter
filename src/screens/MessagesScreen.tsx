@@ -9,6 +9,7 @@ import type { DMConversation, XUser } from "../types/x";
 import { getAvatarColor } from "../utils/avatar";
 import { errorMessage } from "../utils/error";
 import { logger } from "../utils/logger";
+import { handleScrollTopSignal } from "../utils/scrollToTop";
 import { relativeTime } from "../utils/tweetFormat";
 import React, { Component } from "react";
 import {
@@ -29,6 +30,8 @@ export interface MessagesProps {
 	currentUser: XUser | null;
 	onBack: (() => void) | null;
 	onOpenConversation: (conversation: DMConversation) => void;
+	// Bumped by App when the Messages tab is re-tapped; a change scrolls to top.
+	scrollTopSignal?: number;
 }
 
 interface MessagesState {
@@ -76,6 +79,10 @@ export default class MessagesScreen extends Component<MessagesProps, MessagesSta
 		} else {
 			this._load(false);
 		}
+	}
+
+	componentDidUpdate(prev: MessagesProps): void {
+		handleScrollTopSignal(prev.scrollTopSignal, this.props.scrollTopSignal, this._listRef, CACHE_KEY);
 	}
 
 	componentWillUnmount(): void {

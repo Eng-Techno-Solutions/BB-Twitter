@@ -18,6 +18,7 @@ public class HttpPackage implements ReactPackage {
         modules.add(new AudioRecorderModule(reactContext));
         modules.add(new KeyEventModule(reactContext));
         modules.add(new NotificationModule(reactContext));
+        modules.add(new VideoIntentModule(reactContext));
 
         return modules;
     }

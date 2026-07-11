@@ -1,6 +1,12 @@
 import { API, type XGqlOp, X_GQL, X_WEB_BEARER } from "../utils/constants";
 import { request } from "./http";
+import type { HttpResponse } from "./types";
+import { getTransactionId, invalidateTransaction } from "./clientTransaction";
 import { Platform } from "react-native";
+
+// Real x.com path prefix for GraphQL ops — the transaction id is bound to this
+// path, NOT the dev-proxy path the request is actually sent to on web.
+const GQL_PATH = "/i/api/graphql/";
 
 const IS_WEB = Platform.OS === "web";
 const GQL_BASE = IS_WEB ? API.GQL_PROXY : API.GQL_WEB;
@@ -45,10 +51,11 @@ const VIEWER_FEATURES = {
 	creator_subscriptions_tweet_preview_api_enabled: true
 };
 
-// Feature set the SearchTimeline op requires — mirrors x.com's live web client
-// exactly (39 flags). The op rejects the older DEFAULT_FEATURES set with a 400
-// "missing features" error, so it carries its own set.
-const SEARCH_FEATURES = {
+// Modern feature set the current profile/search timeline ops require —
+// SearchTimeline and UserTweetsAndReplies. Mirrors x.com's live web client
+// exactly (39 flags). These ops reject the older DEFAULT_FEATURES set with a 400
+// "missing features" error, so they carry this set.
+const TIMELINE_FEATURES = {
 	rweb_video_screen_enabled: false,
 	rweb_cashtags_enabled: true,
 	profile_label_improvements_pcf_label_in_post_enabled: true,
@@ -139,7 +146,7 @@ export default class XAPI {
 		this.csrf = creds.csrf;
 	}
 
-	_headers(): Record<string, string> {
+	_headers(transactionId?: string): Record<string, string> {
 		const cookie = "auth_token=" + this.authToken + "; ct0=" + this.csrf;
 		const headers: Record<string, string> = {
 			Authorization: X_WEB_BEARER,
@@ -149,6 +156,11 @@ export default class XAPI {
 			"x-twitter-active-user": "yes",
 			"x-twitter-client-language": "en"
 		};
+		// X now rejects some GraphQL ops (SearchTimeline today) without a valid
+		// x-client-transaction-id. Attach it when we have one; omit otherwise.
+		if (transactionId) {
+			headers["x-client-transaction-id"] = transactionId;
+		}
 		// Browsers forbid JS from setting the Cookie header on fetch, so on web we
 		// relay it in a custom header that the dev proxy rewrites to a real Cookie
 		// (setupProxy.js). Native HttpModule has no such restriction.
@@ -171,7 +183,8 @@ export default class XAPI {
 	async _gqlGet(
 		op: XGqlOp,
 		variables: Record<string, unknown>,
-		features?: Record<string, boolean>
+		features?: Record<string, boolean>,
+		fieldToggles?: Record<string, boolean>
 	): Promise<unknown> {
 		const { queryId, name } = this._op(op);
 		const url =
@@ -182,8 +195,11 @@ export default class XAPI {
 			"?variables=" +
 			encodeURIComponent(JSON.stringify(variables)) +
 			"&features=" +
-			encodeURIComponent(JSON.stringify(features || DEFAULT_FEATURES));
-		const res = await request("GET", url, this._headers(), "");
+			encodeURIComponent(JSON.stringify(features || DEFAULT_FEATURES)) +
+			(fieldToggles
+				? "&fieldToggles=" + encodeURIComponent(JSON.stringify(fieldToggles))
+				: "");
+		const res = await this._gqlSend("GET", GQL_PATH + queryId + "/" + name, url, "");
 		return this._parseBody(res.body, res.status);
 	}
 
@@ -196,8 +212,24 @@ export default class XAPI {
 			features: DEFAULT_FEATURES,
 			queryId: queryId
 		});
-		const res = await request("POST", url, this._headers(), body);
+		const res = await this._gqlSend("POST", GQL_PATH + queryId + "/" + name, url, body);
 		return this._parseBody(res.body, res.status);
+	}
+
+	// Sends a GraphQL request with an x-client-transaction-id for `realPath`. A 404
+	// on a txid-bearing request means X rotated its client bundle, so we drop the
+	// cached generator and retry once with a freshly built id.
+	async _gqlSend(method: string, realPath: string, url: string, body: string): Promise<HttpResponse> {
+		const txid = await getTransactionId(method, realPath);
+		let res = await request(method, url, this._headers(txid), body);
+		if (res.status === 404 && txid) {
+			invalidateTransaction();
+			const retryTxid = await getTransactionId(method, realPath);
+			if (retryTxid && retryTxid !== txid) {
+				res = await request(method, url, this._headers(retryTxid), body);
+			}
+		}
+		return res;
 	}
 
 	async _v11Get(path: string, params: Record<string, string | number | boolean>): Promise<unknown> {
@@ -305,7 +337,7 @@ export default class XAPI {
 				withGrokTranslatedBio: true,
 				withQuickPromoteEligibilityTweetFields: false
 			},
-			SEARCH_FEATURES
+			TIMELINE_FEATURES
 		);
 	}
 
@@ -334,26 +366,40 @@ export default class XAPI {
 	}
 
 	userTweetsAndReplies(userId: string, cursor?: string): Promise<unknown> {
-		return this._gqlGet("UserTweetsAndReplies", {
-			userId: userId,
-			count: 20,
-			cursor: cursor,
-			includePromotedContent: false,
-			withCommunity: true,
-			withVoice: true,
-			withV2Timeline: true
-		});
+		// Matches x.com's live request shape: the current persisted query rejects
+		// the old DEFAULT_FEATURES set (400) and no longer takes withV2Timeline.
+		return this._gqlGet(
+			"UserTweetsAndReplies",
+			{
+				userId: userId,
+				count: 20,
+				cursor: cursor,
+				includePromotedContent: false,
+				withCommunity: true,
+				withVoice: true
+			},
+			TIMELINE_FEATURES,
+			{ withArticlePlainText: false }
+		);
 	}
 
 	userMedia(userId: string, cursor?: string): Promise<unknown> {
-		return this._gqlGet("UserMedia", {
-			userId: userId,
-			count: 20,
-			cursor: cursor,
-			includePromotedContent: false,
-			withVoice: true,
-			withV2Timeline: true
-		});
+		// Matches x.com's live request shape: the current persisted query rejects
+		// the old DEFAULT_FEATURES set (400) and no longer takes withV2Timeline.
+		return this._gqlGet(
+			"UserMedia",
+			{
+				userId: userId,
+				count: 20,
+				cursor: cursor,
+				includePromotedContent: false,
+				withClientEventToken: false,
+				withBirdwatchNotes: false,
+				withVoice: true
+			},
+			TIMELINE_FEATURES,
+			{ withArticlePlainText: false }
+		);
 	}
 
 	userLikes(userId: string, cursor?: string): Promise<unknown> {

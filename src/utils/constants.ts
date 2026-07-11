@@ -53,7 +53,14 @@ export const API = {
 	V2_WEB: "https://x.com/i/api/2/",
 	V2_PROXY: "/x-v2/",
 	MEDIA_UPLOAD_WEB: "https://upload.twitter.com/1.1/media/upload.json",
-	MEDIA_UPLOAD_PROXY: "/x-upload/media/upload.json"
+	MEDIA_UPLOAD_PROXY: "/x-upload/media/upload.json",
+	// Public inputs for the x-client-transaction-id generator (clientTransaction.ts):
+	// the homepage (verification key + animation frames) and the abs.twimg.com CDN
+	// host that serves the ondemand.s bundle. No auth needed for either.
+	HOME_WEB: "https://x.com/home",
+	HOME_PROXY: "/x-home",
+	ABS_WEB: "https://abs.twimg.com",
+	ABS_PROXY: "/x-abs"
 } as const;
 
 // GraphQL operation registry — the ONE place X's frontend churn is isolated.
@@ -69,8 +76,8 @@ export const X_GQL = {
 	TweetDetail: ["QuBlQ6SxNAQCt6-kBiCXCQ", "TweetDetail"],
 	UserByScreenName: ["G3KGOASz96M-Qu0nwmGXNg", "UserByScreenName"],
 	UserTweets: ["V7H0Ap3_Hh2FyS75OCDO3Q", "UserTweets"],
-	UserTweetsAndReplies: ["E4wA5vo2sjVyvpliUffSCw", "UserTweetsAndReplies"],
-	UserMedia: ["dexO_2tohK86JDudXXd3Wg", "UserMedia"],
+	UserTweetsAndReplies: ["FIFgycIi-CNJcV0R-135Uw", "UserTweetsAndReplies"],
+	UserMedia: ["DpzwOu8Idtlbfqh-Hf718Q", "UserMedia"],
 	Likes: ["9s8V6sUI8fZLDiN-REkAxA", "Likes"],
 	SearchTimeline: ["Bcw3RzK-PatNAmbnw54hFw", "SearchTimeline"],
 	Bookmarks: ["QUjXNEsMb9YHZ7uZmMPQug", "Bookmarks"],

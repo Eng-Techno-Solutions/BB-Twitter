@@ -20,6 +20,8 @@ export interface HomeProps {
 	onQuote: (tweet: Tweet) => void;
 	onCompose: () => void;
 	onTabChange: (tab: HomeTab) => void;
+	// Bumped by App when the Home tab is re-tapped; forwarded to the feed to scroll to top.
+	scrollTopSignal?: number;
 }
 
 interface HomeState {
@@ -87,12 +89,14 @@ export default class HomeScreen extends Component<HomeProps, HomeState> {
 				<TweetList
 					key={tab}
 					cacheKey={"home:" + tab}
+					scrollWithKeys={true}
 					api={this.props.api}
 					loadPage={this._loadPage}
 					onOpenTweet={this.props.onOpenTweet}
 					onOpenAuthor={this.props.onOpenAuthor}
 					onReply={this.props.onReply}
 					onQuote={this.props.onQuote}
+					scrollTopSignal={this.props.scrollTopSignal}
 					emptyText={
 						tab === "following"
 							? "Follow some accounts to see their posts here."

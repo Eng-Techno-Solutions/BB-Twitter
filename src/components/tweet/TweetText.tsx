@@ -1,4 +1,5 @@
 import { getColors } from "../../theme";
+import { emojiTextStyle, splitEmoji } from "../../utils/emojiFont";
 import React, { Component } from "react";
 import { Linking, Platform, StyleSheet, Text } from "react-native";
 import type { StyleProp, TextStyle } from "react-native";
@@ -65,9 +66,27 @@ export default class TweetText extends Component<TweetTextProps> {
 		);
 	}
 
+	// Renders a plain-text run, wrapping emoji sub-runs in the bundled emoji font
+	// so they render on Android 4.3 instead of tofu. Off Android this returns the
+	// raw string unchanged (splitEmoji is a no-op there).
+	_renderText(text: string, key: number): React.ReactNode {
+		const segments = splitEmoji(text);
+		if (segments.length === 1 && !segments[0].emoji) return text;
+		return segments.map(function (seg, i: number) {
+			if (!seg.emoji) return seg.value;
+			return (
+				<Text
+					key={key + ":" + i}
+					style={emojiTextStyle}>
+					{seg.value}
+				</Text>
+			);
+		});
+	}
+
 	_renderToken(token: Token, key: number, accent: string): React.ReactNode {
 		const self = this;
-		if (token.type === "text") return token.value;
+		if (token.type === "text") return this._renderText(token.value, key);
 		if (token.type === "url") {
 			return (
 				<Text

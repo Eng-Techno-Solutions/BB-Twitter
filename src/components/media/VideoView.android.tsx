@@ -2,7 +2,7 @@ import type { XMedia } from "../../types/x";
 import { logger } from "../../utils/logger";
 import Icon from "../ui/Icon";
 import React, { Component } from "react";
-import { Image, Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Image, Linking, NativeModules, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { ImageStyle, TextStyle, ViewStyle } from "react-native";
 
 interface VideoViewProps {
@@ -19,6 +19,15 @@ export default class VideoView extends Component<VideoViewProps> {
 		// Only ever open a real video stream — never the poster image.
 		const url = this.props.media.videoUrl;
 		if (!url) return;
+		// Route through the native intent so Android picks a video player (typed
+		// video/mp4), not the browser. Fall back to Linking if the module is absent.
+		const videoIntent = NativeModules.VideoIntentModule;
+		if (videoIntent && videoIntent.openVideo) {
+			videoIntent.openVideo(url).catch(function (err: unknown) {
+				logger.warn("VideoView.open", "could not open video", err);
+			});
+			return;
+		}
 		Linking.openURL(url).catch(function (err: unknown) {
 			logger.warn("VideoView.open", "could not open video", err);
 		});

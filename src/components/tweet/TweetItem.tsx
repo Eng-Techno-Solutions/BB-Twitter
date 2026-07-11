@@ -1,8 +1,12 @@
 import { getColors } from "../../theme";
+// Body/quote text inherit the reader's chosen font size; other chrome (name,
+// handle, timestamps, counts) stays fixed so only the post copy scales.
+const BODY_LINE_HEIGHT_RATIO = 1.33;
 import type { Tweet, XUser } from "../../types/x";
 import { getAvatarColor } from "../../utils/avatar";
 import { abbreviateCount, relativeTime } from "../../utils/tweetFormat";
 import { TweetMedia } from "../media";
+import EmojiText from "../ui/EmojiText";
 import Icon from "../ui/Icon";
 import { styles } from "./TweetItem.styles";
 import TweetText from "./TweetText";
@@ -18,6 +22,9 @@ export interface TweetItemProps {
 	onRetweet: (tweet: Tweet) => void;
 	onLike: (tweet: Tweet) => void;
 	onBookmark: (tweet: Tweet) => void;
+	// Reader-selected body font size (theme.getMessageFontSize()); quote text
+	// renders one point smaller, matching the fixed 15/14 default relationship.
+	fontSize: number;
 }
 
 // The core list row — rendered for every tweet in every feed, so it is a strict
@@ -37,7 +44,8 @@ export default class TweetItem extends Component<TweetItemProps> {
 			a.retweetCount !== b.retweetCount ||
 			a.replyCount !== b.replyCount ||
 			a.quoteCount !== b.quoteCount ||
-			this.props.nowMs !== next.nowMs
+			this.props.nowMs !== next.nowMs ||
+			this.props.fontSize !== next.fontSize
 		);
 	}
 
@@ -68,11 +76,11 @@ export default class TweetItem extends Component<TweetItemProps> {
 							style={styles.quoteAvatar}
 						/>
 					) : null}
-					<Text
+					<EmojiText
 						style={[styles.quoteName, { color: colors.textPrimary }]}
-						numberOfLines={1}>
-						{quoted.author.name}
-					</Text>
+						numberOfLines={1}
+						text={quoted.author.name}
+					/>
 					<Text
 						style={[styles.quoteHandle, { color: colors.textTertiary }]}
 						numberOfLines={1}>
@@ -81,7 +89,14 @@ export default class TweetItem extends Component<TweetItemProps> {
 				</View>
 				<TweetText
 					text={quoted.text}
-					style={[styles.quoteText, { color: colors.textSecondary }]}
+					style={[
+						styles.quoteText,
+						{
+							color: colors.textSecondary,
+							fontSize: this.props.fontSize - 1,
+							lineHeight: Math.round((this.props.fontSize - 1) * BODY_LINE_HEIGHT_RATIO)
+						}
+					]}
 					numberOfLines={4}
 				/>
 			</View>
@@ -137,11 +152,11 @@ export default class TweetItem extends Component<TweetItemProps> {
 								size={13}
 								color={colors.textTertiary}
 							/>
-							<Text
+							<EmojiText
 								style={[styles.repostAttrText, { color: colors.textTertiary }]}
-								numberOfLines={1}>
-								{tweet.retweetedBy.name} reposted
-							</Text>
+								numberOfLines={1}
+								text={tweet.retweetedBy.name + " reposted"}
+							/>
 						</View>
 					) : null}
 
@@ -157,11 +172,11 @@ export default class TweetItem extends Component<TweetItemProps> {
 
 						<View style={styles.contentCol}>
 							<View style={styles.headerRow}>
-								<Text
+								<EmojiText
 									style={[styles.name, { color: colors.textPrimary }]}
-									numberOfLines={1}>
-									{author.name}
-								</Text>
+									numberOfLines={1}
+									text={author.name}
+								/>
 								{author.verified ? (
 									<Icon
 										name="badge-check"
@@ -189,7 +204,14 @@ export default class TweetItem extends Component<TweetItemProps> {
 							{tweet.text ? (
 								<TweetText
 									text={tweet.text}
-									style={[styles.text, { color: colors.textPrimary }]}
+									style={[
+										styles.text,
+										{
+											color: colors.textPrimary,
+											fontSize: this.props.fontSize,
+											lineHeight: Math.round(this.props.fontSize * BODY_LINE_HEIGHT_RATIO)
+										}
+									]}
 								/>
 							) : null}
 
