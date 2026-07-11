@@ -1,6 +1,7 @@
 import type XAPI from "../api/xapi";
 import { Header } from "../components";
-import { TweetList, TweetText } from "../components/tweet";
+import { TweetMedia } from "../components/media";
+import { RepostMenu, TweetList, TweetText } from "../components/tweet";
 import Icon from "../components/ui/Icon";
 import {
 	applyBookmark,
@@ -18,8 +19,11 @@ import { getAvatarColor } from "../utils/avatar";
 import { logger } from "../utils/logger";
 import { abbreviateCount, fullTimestamp } from "../utils/tweetFormat";
 import React, { Component } from "react";
-import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Dimensions, Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { ImageStyle, TextStyle, ViewStyle } from "react-native";
+
+// Focal tweet spans the full width minus its horizontal padding (14 each side).
+const FOCAL_MEDIA_W: number = Dimensions.get("window").width - 28;
 
 export interface TweetDetailProps {
 	themeMode: ThemeMode;
@@ -29,10 +33,13 @@ export interface TweetDetailProps {
 	onOpenTweet: (tweet: Tweet) => void;
 	onOpenAuthor: (user: XUser) => void;
 	onReply: (tweet: Tweet) => void;
+	onQuote: (tweet: Tweet) => void;
 }
 
 interface TweetDetailState {
 	focal: Tweet | null;
+	// Whether the focal tweet's Repost/Quote chooser is open.
+	repostMenuOpen: boolean;
 }
 
 // A tweet and its reply thread. The focal tweet renders large as the list header
@@ -41,8 +48,34 @@ interface TweetDetailState {
 export default class TweetDetailScreen extends Component<TweetDetailProps, TweetDetailState> {
 	constructor(props: TweetDetailProps) {
 		super(props);
-		this.state = { focal: props.tweetId ? null : null };
+		this.state = { focal: null, repostMenuOpen: false };
 		this._loadPage = this._loadPage.bind(this);
+		this._openRepostMenu = this._openRepostMenu.bind(this);
+		this._closeRepostMenu = this._closeRepostMenu.bind(this);
+		this._onMenuRepost = this._onMenuRepost.bind(this);
+		this._onMenuQuote = this._onMenuQuote.bind(this);
+	}
+
+	_openRepostMenu(): void {
+		this.setState({ repostMenuOpen: true });
+	}
+
+	_closeRepostMenu(): void {
+		this.setState({ repostMenuOpen: false });
+	}
+
+	_onMenuRepost(): void {
+		const api = this.props.api;
+		this._closeRepostMenu();
+		this._engageFocal(applyRetweet, function (t: Tweet) {
+			return commitRetweet(api, t.id, t.retweeted);
+		});
+	}
+
+	_onMenuQuote(): void {
+		const focal = this.state.focal;
+		this._closeRepostMenu();
+		if (focal) this.props.onQuote(focal);
 	}
 
 	// Single source of truth for the conversation fetch: TweetList drives it, and
@@ -137,6 +170,11 @@ export default class TweetDetailScreen extends Component<TweetDetailProps, Tweet
 					/>
 				) : null}
 
+				<TweetMedia
+					media={focal.media}
+					width={FOCAL_MEDIA_W}
+				/>
+
 				<Text style={[styles.timestamp, { color: c.textTertiary }]}>
 					{fullTimestamp(focal.createdAt)}
 				</Text>
@@ -162,11 +200,7 @@ export default class TweetDetailScreen extends Component<TweetDetailProps, Tweet
 					</TouchableOpacity>
 					<TouchableOpacity
 						style={styles.action}
-						onPress={function () {
-							self._engageFocal(applyRetweet, function (t: Tweet) {
-								return commitRetweet(api, t.id, t.retweeted);
-							});
-						}}>
+						onPress={self._openRepostMenu}>
 						<Icon
 							name="repeat"
 							size={20}
@@ -218,9 +252,18 @@ export default class TweetDetailScreen extends Component<TweetDetailProps, Tweet
 					onOpenTweet={this.props.onOpenTweet}
 					onOpenAuthor={this.props.onOpenAuthor}
 					onReply={this.props.onReply}
+					onQuote={this.props.onQuote}
 					ListHeaderComponent={this._renderFocal()}
 					emptyText="No replies yet."
 				/>
+				{this.state.repostMenuOpen && this.state.focal ? (
+					<RepostMenu
+						retweeted={this.state.focal.retweeted}
+						onRepost={this._onMenuRepost}
+						onQuote={this._onMenuQuote}
+						onClose={this._closeRepostMenu}
+					/>
+				) : null}
 			</View>
 		);
 	}

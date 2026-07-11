@@ -1,12 +1,9 @@
-import { Dimensions, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 import type { ImageStyle, TextStyle, ViewStyle } from "react-native";
 
-const SCREEN_W: number = Dimensions.get("window").width;
 const AVATAR = 40;
 const H_PAD = 12;
 const GUTTER = 10;
-// Width available to the tweet content column (used to size media).
-export const CONTENT_W: number = SCREEN_W - H_PAD * 2 - AVATAR - GUTTER;
 
 export const styles = StyleSheet.create({
 	container: {
@@ -40,30 +37,6 @@ export const styles = StyleSheet.create({
 
 	replyingTo: { fontSize: 14, marginTop: 1 } as TextStyle,
 	text: { fontSize: 15, lineHeight: 20, marginTop: 2 } as TextStyle,
-
-	mediaWrap: {
-		marginTop: 8,
-		borderRadius: 14,
-		overflow: "hidden",
-		borderWidth: StyleSheet.hairlineWidth
-	} as ViewStyle,
-	mediaSingle: { width: CONTENT_W, height: Math.round(CONTENT_W * 0.56) } as ImageStyle,
-	mediaGridRow: { flexDirection: "row" } as ViewStyle,
-	mediaGridItem: {
-		width: (CONTENT_W - 2) / 2,
-		height: Math.round(CONTENT_W * 0.4),
-		margin: 1
-	} as ImageStyle,
-	videoBadge: {
-		position: "absolute",
-		bottom: 8,
-		left: 8,
-		paddingHorizontal: 6,
-		paddingVertical: 2,
-		borderRadius: 4,
-		backgroundColor: "rgba(0,0,0,0.7)"
-	} as ViewStyle,
-	videoBadgeText: { color: "#FFFFFF", fontSize: 11, fontWeight: "600" } as TextStyle,
 
 	quote: {
 		marginTop: 8,

@@ -40,6 +40,38 @@ function messageText(entry: any): string {
 	return "";
 }
 
+// X nests a notification's actors and target tweet inside its template, NOT at the
+// top level. The common shape is template.aggregateUserActionsV1 with fromUsers
+// ([{user:{id}}]) and targetObjects ([{tweet:{id}}]); other templates carry the
+// same fields directly. Read defensively across both.
+function notificationTemplate(notifObj: any): any {
+	const template = notifObj && notifObj.template;
+	if (!template) return {};
+	return template.aggregateUserActionsV1 || template;
+}
+
+function actorIds(notifObj: any): string[] {
+	const fromUsers = notificationTemplate(notifObj).fromUsers;
+	if (!Array.isArray(fromUsers)) return [];
+	return fromUsers
+		.map(function (u: any) {
+			return u && u.user && u.user.id ? String(u.user.id) : str(u, "");
+		})
+		.filter(Boolean);
+}
+
+function targetTweetId(notifObj: any): string {
+	const targets = notificationTemplate(notifObj).targetObjects;
+	if (Array.isArray(targets)) {
+		for (let i = 0; i < targets.length; i++) {
+			const t = targets[i];
+			if (t && t.tweet && t.tweet.id) return String(t.tweet.id);
+		}
+	}
+	// Some templates expose the id directly.
+	return str(notifObj && notifObj.tweetId, "");
+}
+
 export function parseNotifications(response: any): NotificationsPage {
 	const globals = (response && response.globalObjects) || {};
 	const usersById = globals.users || {};
@@ -50,18 +82,42 @@ export function parseNotifications(response: any): NotificationsPage {
 	const items: XNotification[] = [];
 	let cursor: string | undefined;
 
-	// The tweet objects in globalObjects are legacy-only; wrap each so the shared
-	// tweet parser can normalize it (with its author looked up from usersById).
-	function tweetById(id: string): Tweet | undefined {
+	// The tweet objects in globalObjects are legacy-only and reference their
+	// quoted/retweeted originals by id (quoted_status_id_str / retweeted_status_id_str)
+	// rather than inlining them like GraphQL does. Wrap each into the GraphQL-ish
+	// shape the shared parser expects — including nested quote/retweet results — so
+	// parseTweetResult resolves media, counts, quotes and retweets uniformly. `seen`
+	// guards against a malformed self/cyclic reference recursing forever.
+	function wrapTweet(id: string, seen: Record<string, boolean>): any {
 		const raw = tweetsById[id];
-		if (!raw) return undefined;
+		if (!raw || seen[id]) return null;
+		seen[id] = true;
 		const authorId = str(raw.user_id_str, "");
-		const wrapped = {
+		const legacy: any = {
+			...raw,
+			is_quote_status: Boolean(raw.is_quote_status || raw.quoted_status_id_str)
+		};
+		const quotedId = str(raw.quoted_status_id_str, "");
+		if (quotedId) {
+			const quoted = wrapTweet(quotedId, seen);
+			if (quoted) legacy.quoted_status_result = { result: quoted };
+		}
+		const retweetedId = str(raw.retweeted_status_id_str, "");
+		if (retweetedId) {
+			const retweeted = wrapTweet(retweetedId, seen);
+			if (retweeted) legacy.retweeted_status_result = { result: retweeted };
+		}
+		return {
 			rest_id: id,
-			legacy: raw,
+			legacy: legacy,
 			core: { user_results: { result: { rest_id: authorId, legacy: usersById[authorId] || {} } } },
 			views: raw.ext_views ? { count: str(raw.ext_views.count, "0") } : undefined
 		};
+	}
+
+	function tweetById(id: string): Tweet | undefined {
+		const wrapped = wrapTweet(id, {});
+		if (!wrapped) return undefined;
 		return parseTweetResult(wrapped) || undefined;
 	}
 
@@ -88,16 +144,21 @@ export function parseNotifications(response: any): NotificationsPage {
 			const notifId = notif && notif.id ? notif.id : entry.entryId;
 			const notifObj = (globals.notifications || {})[notifId];
 			if (notifObj) {
-				const fromUserIds: string[] = notifObj.fromUsers || [];
+				const tweetId = targetTweetId(notifObj);
+				const tweet = tweetId ? tweetById(tweetId) : undefined;
+				let users = actorIds(notifObj).map(function (uid: string) {
+					return userFromGlobal(usersById[uid], uid);
+				});
+				// "Recent post from X" notifications often omit fromUsers — the actor IS
+				// the poster, so fall back to the tweet author for the avatar/name.
+				if (users.length === 0 && tweet) users = [tweet.author];
 				items.push({
 					id: str(notifId, String(j)),
 					kind: kindFromEntry(notifObj),
 					createdAt: num(parseInt(notifObj.timestampMs, 10), 0),
 					text: messageText(notifObj),
-					users: fromUserIds.map(function (uid: string) {
-						return userFromGlobal(usersById[uid], uid);
-					}),
-					tweet: notifObj.tweetId ? tweetById(str(notifObj.tweetId, "")) : undefined
+					users: users,
+					tweet: tweet
 				});
 				continue;
 			}

@@ -27,6 +27,7 @@ export interface ProfileProps {
 	onOpenTweet: (tweet: Tweet) => void;
 	onOpenAuthor: (user: XUser) => void;
 	onReply: (tweet: Tweet) => void;
+	onQuote: (tweet: Tweet) => void;
 	onSettings?: () => void;
 }
 
@@ -196,11 +197,13 @@ export default class ProfileScreen extends Component<ProfileProps, ProfileState>
 				/>
 				<TweetList
 					key={this.state.tab}
+					cacheKey={"profile:" + this.props.user.id + ":" + this.state.tab}
 					api={this.props.api}
 					loadPage={this._loadPage}
 					onOpenTweet={this.props.onOpenTweet}
 					onOpenAuthor={this.props.onOpenAuthor}
 					onReply={this.props.onReply}
+					onQuote={this.props.onQuote}
 					ListHeaderComponent={this._renderHeader()}
 					emptyText="Nothing here yet."
 				/>

@@ -2,6 +2,7 @@ import type XAPI from "../api/xapi";
 import { Header } from "../components";
 import Icon from "../components/ui/Icon";
 import { loadConversation, sendMessage } from "../services/dmService";
+import { getView, saveView } from "../services/viewCache";
 import { getColors } from "../theme";
 import type { ThemeMode } from "../theme";
 import type { DMConversation, DMMessage } from "../types/x";
@@ -35,6 +36,11 @@ interface DMConversationState {
 	sending: boolean;
 }
 
+// One cache entry per conversation so reopening a thread restores instantly.
+function cacheKeyFor(conversationId: string): string {
+	return "dm:" + conversationId;
+}
+
 // A single DM thread: message bubbles (mine right/accent, theirs left/muted) over
 // a send bar. Sends optimistically append and reconcile on the next load.
 export default class DMConversationScreen extends Component<
@@ -46,7 +52,17 @@ export default class DMConversationScreen extends Component<
 
 	constructor(props: DMConversationProps) {
 		super(props);
-		this.state = { messages: [], loading: true, error: null, draft: "", sending: false };
+		// Warm cache → paint the thread instantly. Unlike the inbox we still
+		// background-refresh in componentDidMount (a live conversation with no
+		// pull-to-refresh), so cached messages show first, fresh ones follow.
+		const cached = getView<DMMessage>(cacheKeyFor(props.conversation.id));
+		this.state = {
+			messages: cached ? cached.data : [],
+			loading: cached ? false : true,
+			error: null,
+			draft: "",
+			sending: false
+		};
 		this._mounted = false;
 		this._list = null;
 		this._renderItem = this._renderItem.bind(this);
@@ -65,6 +81,7 @@ export default class DMConversationScreen extends Component<
 		try {
 			const messages = await loadConversation(this.props.api, this.props.conversation.id);
 			if (!this._mounted) return;
+			saveView(cacheKeyFor(this.props.conversation.id), messages);
 			this.setState({ messages: messages, loading: false, error: null });
 		} catch (err: unknown) {
 			if (!this._mounted) return;

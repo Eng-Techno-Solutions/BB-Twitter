@@ -3,6 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- video.twimg.com 403s any non-x.com Referer. With no Referer it returns 206, so
+       dropping the Referer lets the browser stream video directly from the CDN (native
+       range/seek/buffering) — no dev proxy in the media path. Harmless elsewhere: API
+       calls go same-origin through the proxy, images ignore the Referer. -->
+  <meta name="referrer" content="no-referrer" />
   <link rel="icon" href="%PUBLIC_URL%/favicon.png" />
   <title>BB Twitter</title>
   <style>

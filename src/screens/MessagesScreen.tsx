@@ -2,6 +2,7 @@ import type XAPI from "../api/xapi";
 import { Header } from "../components";
 import Icon from "../components/ui/Icon";
 import { loadInbox } from "../services/dmService";
+import { getView, saveView, setScrollOffset } from "../services/viewCache";
 import { getColors } from "../theme";
 import type { ThemeMode } from "../theme";
 import type { DMConversation, XUser } from "../types/x";
@@ -41,37 +42,69 @@ interface MessagesState {
 // DM inbox — one row per conversation (other party's avatar + name + last-message
 // preview + time). Tapping opens the conversation. Best-effort against X's DM
 // inbox endpoint; degrades to an empty state.
+// Cache key: the DM inbox is per-account and single-page, so one key suffices.
+const CACHE_KEY = "messages";
+
 export default class MessagesScreen extends Component<MessagesProps, MessagesState> {
 	_mounted: boolean;
+	_listRef: FlatList<DMConversation> | null;
+	_restoreOffset: number;
 
 	constructor(props: MessagesProps) {
 		super(props);
+		// Warm cache → render synchronously, no spinner, no refetch, position kept.
+		const cached = getView<DMConversation>(CACHE_KEY);
 		this.state = {
-			conversations: [],
-			loading: true,
+			conversations: cached ? cached.data : [],
+			loading: cached ? false : true,
 			refreshing: false,
 			error: null,
 			nowMs: Date.now()
 		};
 		this._mounted = false;
+		this._listRef = null;
+		this._restoreOffset = cached ? cached.scrollOffset : 0;
 		this._renderItem = this._renderItem.bind(this);
 		this._refresh = this._refresh.bind(this);
 	}
 
 	componentDidMount(): void {
 		this._mounted = true;
-		this._load(false);
+		// Cache hit: restore scroll, no refetch (pull to refresh gets new messages).
+		if (this.state.conversations.length > 0) {
+			this._restoreScroll();
+		} else {
+			this._load(false);
+		}
 	}
 
 	componentWillUnmount(): void {
 		this._mounted = false;
 	}
 
+	_restoreScroll(): void {
+		const offset = this._restoreOffset;
+		if (!offset) return;
+		const self = this;
+		const apply = function () {
+			if (self._mounted && self._listRef) {
+				self._listRef.scrollToOffset({ offset: offset, animated: false });
+			}
+		};
+		setTimeout(apply, 0);
+		setTimeout(apply, 200);
+	}
+
+	_onScroll = (e: { nativeEvent: { contentOffset: { y: number } } }): void => {
+		setScrollOffset(CACHE_KEY, e.nativeEvent.contentOffset.y);
+	};
+
 	async _load(isRefresh: boolean): Promise<void> {
 		const selfId = this.props.currentUser ? this.props.currentUser.id : "";
 		try {
 			const conversations = await loadInbox(this.props.api, selfId);
 			if (!this._mounted) return;
+			saveView(CACHE_KEY, conversations);
 			this.setState({
 				conversations: conversations,
 				loading: false,
@@ -169,6 +202,11 @@ export default class MessagesScreen extends Component<MessagesProps, MessagesSta
 					</View>
 				) : (
 					<FlatList
+						ref={(ref) => {
+							this._listRef = ref;
+						}}
+						onScroll={this._onScroll}
+						scrollEventThrottle={100}
 						data={conversations}
 						keyExtractor={function (conv: DMConversation) {
 							return conv.id;

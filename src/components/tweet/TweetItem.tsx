@@ -1,7 +1,8 @@
 import { getColors } from "../../theme";
-import type { Tweet, XMedia, XUser } from "../../types/x";
+import type { Tweet, XUser } from "../../types/x";
 import { getAvatarColor } from "../../utils/avatar";
 import { abbreviateCount, relativeTime } from "../../utils/tweetFormat";
+import { TweetMedia } from "../media";
 import Icon from "../ui/Icon";
 import { styles } from "./TweetItem.styles";
 import TweetText from "./TweetText";
@@ -53,56 +54,6 @@ export default class TweetItem extends Component<TweetItemProps> {
 		return (
 			<View style={[sizeStyle, fallbackStyle, { backgroundColor: getAvatarColor(user.id) }]}>
 				<Text style={styles.avatarInitial}>{initial}</Text>
-			</View>
-		);
-	}
-
-	_renderMedia(media: XMedia[], colors: ReturnType<typeof getColors>): React.ReactNode {
-		if (!media || media.length === 0) return null;
-		const isVideo = media[0].type === "video" || media[0].type === "animated_gif";
-
-		if (media.length === 1) {
-			return (
-				<View style={[styles.mediaWrap, { borderColor: colors.border }]}>
-					<Image
-						source={{ uri: media[0].url }}
-						style={styles.mediaSingle}
-						resizeMode="cover"
-					/>
-					{isVideo ? (
-						<View style={styles.videoBadge}>
-							<Text style={styles.videoBadgeText}>{media[0].type === "animated_gif" ? "GIF" : "▶"}</Text>
-						</View>
-					) : null}
-				</View>
-			);
-		}
-
-		const shown = media.slice(0, 4);
-		const rows: XMedia[][] = [];
-		for (let i = 0; i < shown.length; i += 2) {
-			rows.push(shown.slice(i, i + 2));
-		}
-		return (
-			<View style={[styles.mediaWrap, { borderColor: colors.border }]}>
-				{rows.map(function (pair: XMedia[], r: number) {
-					return (
-						<View
-							key={r}
-							style={styles.mediaGridRow}>
-							{pair.map(function (m: XMedia, i: number) {
-								return (
-									<Image
-										key={i}
-										source={{ uri: m.url }}
-										style={styles.mediaGridItem}
-										resizeMode="cover"
-									/>
-								);
-							})}
-						</View>
-					);
-				})}
 			</View>
 		);
 	}
@@ -242,7 +193,7 @@ export default class TweetItem extends Component<TweetItemProps> {
 								/>
 							) : null}
 
-							{this._renderMedia(tweet.media, colors)}
+							<TweetMedia media={tweet.media} />
 							{tweet.quoted ? this._renderQuote(tweet.quoted, colors) : null}
 
 							<View style={styles.actionRow}>

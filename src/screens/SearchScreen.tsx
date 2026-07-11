@@ -17,6 +17,7 @@ export interface SearchProps {
 	onOpenTweet: (tweet: Tweet) => void;
 	onOpenAuthor: (user: XUser) => void;
 	onReply: (tweet: Tweet) => void;
+	onQuote: (tweet: Tweet) => void;
 }
 
 interface SearchState {
@@ -116,11 +117,13 @@ export default class SearchScreen extends Component<SearchProps, SearchState> {
 				{query ? (
 					<TweetList
 						key={query + ":" + product}
+						cacheKey={"search:" + query + ":" + product}
 						api={this.props.api}
 						loadPage={this._loadPage}
 						onOpenTweet={this.props.onOpenTweet}
 						onOpenAuthor={this.props.onOpenAuthor}
 						onReply={this.props.onReply}
+						onQuote={this.props.onQuote}
 						emptyText="No results."
 					/>
 				) : (

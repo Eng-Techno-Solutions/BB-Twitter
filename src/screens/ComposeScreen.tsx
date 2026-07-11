@@ -296,7 +296,15 @@ const styles = StyleSheet.create<{
 	avatar: { width: 40, height: 40, borderRadius: 20, marginRight: 10 },
 	avatarFallback: { alignItems: "center", justifyContent: "center" },
 	avatarInitial: { color: "#FFFFFF", fontSize: 16, fontWeight: "bold" },
-	input: { flex: 1, fontSize: 18, lineHeight: 24, minHeight: 120, paddingTop: 8 },
+	input: {
+		flex: 1,
+		fontSize: 18,
+		lineHeight: 24,
+		minHeight: 120,
+		paddingTop: 8,
+		paddingHorizontal: 10,
+		borderRadius: 8
+	},
 	quote: { marginTop: 12, borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, padding: 10 },
 	quoteName: { fontSize: 14, fontWeight: "700" },
 	quoteText: { fontSize: 14, lineHeight: 19, marginTop: 2 },

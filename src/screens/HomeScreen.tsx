@@ -17,6 +17,7 @@ export interface HomeProps {
 	onOpenTweet: (tweet: Tweet) => void;
 	onOpenAuthor: (user: XUser) => void;
 	onReply: (tweet: Tweet) => void;
+	onQuote: (tweet: Tweet) => void;
 	onCompose: () => void;
 	onTabChange: (tab: HomeTab) => void;
 }
@@ -85,11 +86,13 @@ export default class HomeScreen extends Component<HomeProps, HomeState> {
 
 				<TweetList
 					key={tab}
+					cacheKey={"home:" + tab}
 					api={this.props.api}
 					loadPage={this._loadPage}
 					onOpenTweet={this.props.onOpenTweet}
 					onOpenAuthor={this.props.onOpenAuthor}
 					onReply={this.props.onReply}
+					onQuote={this.props.onQuote}
 					emptyText={
 						tab === "following"
 							? "Follow some accounts to see their posts here."

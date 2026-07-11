@@ -45,6 +45,36 @@ const VIEWER_FEATURES = {
 	creator_subscriptions_tweet_preview_api_enabled: true
 };
 
+// Enrichment params for the legacy notifications/all.json endpoint. Mirrors the
+// set x.com's web client sends so the tweets embedded in notifications carry full
+// media, quoted tweets, entities, counts and extended text (tweet_mode=extended).
+const NOTIFICATION_TWEET_PARAMS: Record<string, string | number | boolean> = {
+	include_profile_interstitial_type: 1,
+	include_blocking: 1,
+	include_blocked_by: 1,
+	include_followed_by: 1,
+	include_want_retweets: 1,
+	include_mute_edge: 1,
+	include_can_dm: 1,
+	include_can_media_tag: 1,
+	include_ext_is_blue_verified: 1,
+	include_ext_verified_type: 1,
+	skip_status: 1,
+	cards_platform: "Web-12",
+	include_cards: 1,
+	include_ext_alt_text: true,
+	include_quote_count: true,
+	include_reply_count: 1,
+	tweet_mode: "extended",
+	include_ext_views: true,
+	include_entities: true,
+	include_user_entities: true,
+	include_ext_media_availability: true,
+	send_error_codes: true,
+	simple_quoted_tweet: true,
+	ext: "mediaStats,highlightedLabel,voiceInfo,birdwatchPivot,superFollowMetadata,editControl"
+};
+
 export interface XCredentials {
 	authToken: string;
 	csrf: string;
@@ -351,8 +381,15 @@ export default class XAPI {
 	}
 
 	// ---- Notifications ------------------------------------------------------
+	// notifications/all.json returns tweets in a globalObjects bag. WITHOUT these
+	// include_*/ext params X returns skeletal tweets (no media, no quoted tweet, no
+	// counts, truncated text) — the same param set x.com's web client sends, so
+	// "Recent post from X" rows carry the full post (avatar, media, quote, counts).
 	notifications(cursor?: string): Promise<unknown> {
-		const params: Record<string, string | number | boolean> = { count: 40 };
+		const params: Record<string, string | number | boolean> = {
+			...NOTIFICATION_TWEET_PARAMS,
+			count: 40
+		};
 		if (cursor) params.cursor = cursor;
 		return this._v2Get("notifications/all.json", params);
 	}

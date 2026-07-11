@@ -32,9 +32,9 @@ export const styles = StyleSheet.create({
 	fab: {
 		position: "absolute",
 		right: 16,
-		bottom: 84,
-		width: 52,
-		height: 52,
+		bottom: 10,
+		width: 40,
+		height: 40,
 		borderRadius: 26,
 		alignItems: "center",
 		justifyContent: "center",

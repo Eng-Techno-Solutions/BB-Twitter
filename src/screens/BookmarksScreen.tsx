@@ -15,6 +15,7 @@ export interface BookmarksProps {
 	onOpenTweet: (tweet: Tweet) => void;
 	onOpenAuthor: (user: XUser) => void;
 	onReply: (tweet: Tweet) => void;
+	onQuote: (tweet: Tweet) => void;
 }
 
 // Saved posts — the bookmarks timeline over the shared TweetList. Thin, because
@@ -38,11 +39,13 @@ export default class BookmarksScreen extends Component<BookmarksProps> {
 					onBack={this.props.onBack}
 				/>
 				<TweetList
+					cacheKey="bookmarks"
 					api={this.props.api}
 					loadPage={this._loadPage}
 					onOpenTweet={this.props.onOpenTweet}
 					onOpenAuthor={this.props.onOpenAuthor}
 					onReply={this.props.onReply}
+					onQuote={this.props.onQuote}
 					emptyText="You haven't added any posts to your Bookmarks yet."
 				/>
 			</View>

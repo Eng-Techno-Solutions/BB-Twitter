@@ -24,6 +24,7 @@ import {
 } from "./services/accountManager";
 import { loadUnreadCount } from "./services/notificationsService";
 import type { HomeTab } from "./services/timelineLoader";
+import { clearViews } from "./services/viewCache";
 import { getColors, setFontSizeKey, setMode } from "./theme";
 import type { FontSizeKey } from "./theme";
 import type { AppProps as Props, StackEntry, AppState as State, TabKey } from "./types/app";
@@ -201,6 +202,9 @@ export default class App extends Component<Props, State> {
 		const api = new XAPI(session);
 		const accounts = upsertAccount(this.state.accounts, user, session);
 		await persistAccountLogin(accounts, user.id);
+		// New session boundary (login / account switch): drop the previous
+		// account's cached views so we never render them under the new user.
+		clearViews();
 		this.setState({
 			api: api,
 			currentUser: user,
@@ -219,6 +223,7 @@ export default class App extends Component<Props, State> {
 			this.state.currentUser ? this.state.currentUser.id : ""
 		);
 		await clearToken();
+		clearViews();
 		this.setState(Object.assign({}, getResetState(), { accounts: accounts, initializing: false }));
 	};
 
@@ -260,6 +265,10 @@ export default class App extends Component<Props, State> {
 		this.navigate("compose", { mode: "reply", target: tweet });
 	};
 
+	_quote = (tweet: Tweet): void => {
+		this.navigate("compose", { mode: "quote", target: tweet });
+	};
+
 	_compose = (): void => {
 		this.navigate("compose", { mode: "tweet" });
 	};
@@ -293,6 +302,7 @@ export default class App extends Component<Props, State> {
 						onOpenTweet={this._openTweet}
 						onOpenAuthor={this._openAuthor}
 						onReply={this._reply}
+						onQuote={this._quote}
 						onCompose={this._compose}
 						onTabChange={this._changeHomeTab}
 					/>
@@ -306,6 +316,7 @@ export default class App extends Component<Props, State> {
 						onOpenTweet={this._openTweet}
 						onOpenAuthor={this._openAuthor}
 						onReply={this._reply}
+						onQuote={this._quote}
 					/>
 				);
 			case "notifications":
@@ -354,6 +365,7 @@ export default class App extends Component<Props, State> {
 						onOpenTweet={this._openTweet}
 						onOpenAuthor={this._openAuthor}
 						onReply={this._reply}
+						onQuote={this._quote}
 						onSettings={() => {
 							this.navigate("settings", {});
 						}}
@@ -370,6 +382,7 @@ export default class App extends Component<Props, State> {
 						onOpenTweet={this._openTweet}
 						onOpenAuthor={this._openAuthor}
 						onReply={this._reply}
+						onQuote={this._quote}
 					/>
 				);
 			case "compose":
@@ -393,6 +406,7 @@ export default class App extends Component<Props, State> {
 						onOpenTweet={this._openTweet}
 						onOpenAuthor={this._openAuthor}
 						onReply={this._reply}
+						onQuote={this._quote}
 					/>
 				);
 			case "settings":

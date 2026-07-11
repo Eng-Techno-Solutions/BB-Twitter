@@ -1,8 +1,10 @@
 import type XAPI from "../api/xapi";
 import { Header } from "../components";
+import { TweetMedia } from "../components/media";
 import { TweetText } from "../components/tweet";
 import Icon from "../components/ui/Icon";
 import { loadNotifications } from "../services/notificationsService";
+import { getView, saveView, setScrollOffset } from "../services/viewCache";
 import { getColors } from "../theme";
 import type { ThemeMode } from "../theme";
 import type { NotificationKind, Tweet, XNotification, XUser } from "../types/x";
@@ -52,30 +54,69 @@ const KIND_ICON: Record<NotificationKind, string> = {
 // Notifications feed. A flat list of notification rows (leading kind icon +
 // actor avatars + text, with an optional tweet preview). Best-effort against X's
 // v2 notifications endpoint; degrades to an empty state on shape drift.
+// Cache key: notifications are per-account and single-page, so one key suffices.
+const CACHE_KEY = "notifications";
+
 export default class NotificationsScreen extends Component<NotificationsProps, NotificationsState> {
 	_mounted: boolean;
+	_listRef: FlatList<XNotification> | null;
+	_restoreOffset: number;
 
 	constructor(props: NotificationsProps) {
 		super(props);
-		this.state = { items: [], loading: true, refreshing: false, error: null, nowMs: Date.now() };
+		// Warm cache → render synchronously, no spinner, no refetch, position kept.
+		const cached = getView<XNotification>(CACHE_KEY);
+		this.state = {
+			items: cached ? cached.data : [],
+			loading: cached ? false : true,
+			refreshing: false,
+			error: null,
+			nowMs: Date.now()
+		};
 		this._mounted = false;
+		this._listRef = null;
+		this._restoreOffset = cached ? cached.scrollOffset : 0;
 		this._renderItem = this._renderItem.bind(this);
 		this._refresh = this._refresh.bind(this);
 	}
 
 	componentDidMount(): void {
 		this._mounted = true;
-		this._load(false);
+		// Cache hit: data already in state — restore scroll, no refetch (pull to
+		// refresh gets new notifications). Otherwise cold load.
+		if (this.state.items.length > 0) {
+			this._restoreScroll();
+		} else {
+			this._load(false);
+		}
 	}
 
 	componentWillUnmount(): void {
 		this._mounted = false;
 	}
 
+	_restoreScroll(): void {
+		const offset = this._restoreOffset;
+		if (!offset) return;
+		const self = this;
+		const apply = function () {
+			if (self._mounted && self._listRef) {
+				self._listRef.scrollToOffset({ offset: offset, animated: false });
+			}
+		};
+		setTimeout(apply, 0);
+		setTimeout(apply, 200);
+	}
+
+	_onScroll = (e: { nativeEvent: { contentOffset: { y: number } } }): void => {
+		setScrollOffset(CACHE_KEY, e.nativeEvent.contentOffset.y);
+	};
+
 	async _load(isRefresh: boolean): Promise<void> {
 		try {
 			const page = await loadNotifications(this.props.api);
 			if (!this._mounted) return;
+			saveView(CACHE_KEY, page.items);
 			this.setState({
 				items: page.items,
 				loading: false,
@@ -156,16 +197,62 @@ export default class NotificationsScreen extends Component<NotificationsProps, N
 								<Text style={{ fontWeight: "700" }}>{actor.name}</Text> {this._verb(item.kind)}
 							</Text>
 						) : null}
-						{item.tweet && item.tweet.text ? (
-							<TweetText
-								text={item.tweet.text}
-								style={[styles.preview, { color: c.textTertiary }]}
-								numberOfLines={2}
-							/>
-						) : null}
+						{item.tweet ? this._renderTweet(item.tweet, c) : null}
 					</View>
 				</View>
 			</TouchableHighlight>
+		);
+	}
+
+	// The embedded post — the enrichment the real app shows: full text, media, and
+	// a nested quoted tweet. Tapping the row opens the tweet detail (with the full
+	// engagement bar), so this stays a read-only preview.
+	_renderTweet(tweet: Tweet, c: ReturnType<typeof getColors>): React.ReactNode {
+		return (
+			<View>
+				{tweet.text ? (
+					<TweetText
+						text={tweet.text}
+						style={[styles.preview, { color: c.textPrimary }]}
+						numberOfLines={6}
+					/>
+				) : null}
+				<TweetMedia media={tweet.media} />
+				{tweet.quoted ? this._renderQuote(tweet.quoted, c) : null}
+			</View>
+		);
+	}
+
+	_renderQuote(quoted: Tweet, c: ReturnType<typeof getColors>): React.ReactNode {
+		return (
+			<View style={[styles.quote, { borderColor: c.border }]}>
+				<View style={styles.quoteHeader}>
+					{quoted.author.avatarUrl ? (
+						<Image
+							source={{ uri: quoted.author.avatarUrl }}
+							style={styles.quoteAvatar}
+						/>
+					) : null}
+					<Text
+						style={[styles.quoteName, { color: c.textPrimary }]}
+						numberOfLines={1}>
+						{quoted.author.name}
+					</Text>
+					<Text
+						style={[styles.quoteHandle, { color: c.textTertiary }]}
+						numberOfLines={1}>
+						@{quoted.author.handle}
+					</Text>
+				</View>
+				{quoted.text ? (
+					<TweetText
+						text={quoted.text}
+						style={[styles.quoteText, { color: c.textSecondary }]}
+						numberOfLines={4}
+					/>
+				) : null}
+				<TweetMedia media={quoted.media} />
+			</View>
 		);
 	}
 
@@ -196,6 +283,11 @@ export default class NotificationsScreen extends Component<NotificationsProps, N
 					</View>
 				) : (
 					<FlatList
+						ref={(ref) => {
+							this._listRef = ref;
+						}}
+						onScroll={this._onScroll}
+						scrollEventThrottle={100}
 						data={items}
 						keyExtractor={function (n: XNotification) {
 							return n.id;
@@ -245,6 +337,12 @@ const styles = StyleSheet.create<{
 	time: TextStyle;
 	text: TextStyle;
 	preview: TextStyle;
+	quote: ViewStyle;
+	quoteHeader: ViewStyle;
+	quoteAvatar: ImageStyle;
+	quoteName: TextStyle;
+	quoteHandle: TextStyle;
+	quoteText: TextStyle;
 }>({
 	center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 40 },
 	emptyText: { fontSize: 15, textAlign: "center", marginTop: 14, lineHeight: 21 },
@@ -262,5 +360,16 @@ const styles = StyleSheet.create<{
 	avatarInitial: { color: "#FFFFFF", fontSize: 13, fontWeight: "bold" },
 	time: { fontSize: 13, marginLeft: "auto" },
 	text: { fontSize: 15, lineHeight: 20 },
-	preview: { fontSize: 14, lineHeight: 19, marginTop: 4 }
+	preview: { fontSize: 15, lineHeight: 20, marginTop: 4 },
+	quote: {
+		marginTop: 8,
+		borderWidth: StyleSheet.hairlineWidth,
+		borderRadius: 14,
+		padding: 10
+	},
+	quoteHeader: { flexDirection: "row", alignItems: "center", marginBottom: 2 },
+	quoteAvatar: { width: 18, height: 18, borderRadius: 9, marginRight: 5 },
+	quoteName: { fontSize: 14, fontWeight: "700" },
+	quoteHandle: { fontSize: 14, marginLeft: 4 },
+	quoteText: { fontSize: 14, lineHeight: 19 }
 });
