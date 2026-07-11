@@ -370,6 +370,18 @@ export default class XAPI {
 		});
 	}
 
+	// Message requests / low-quality inbox. X keeps these OUT of the initial state
+	// (which only returns the "trusted" inbox), so we fetch them separately and
+	// merge, otherwise those conversations are invisible in the app. (dm_users is
+	// not a valid param on this endpoint — it 400s; the timeline endpoints take
+	// filter_low_quality instead.) Best-effort: loadInbox tolerates failure.
+	dmInboxUntrusted(): Promise<unknown> {
+		return this._v11Get("dm/inbox_timeline/untrusted.json", {
+			filter_low_quality: false,
+			include_conversation_info: true
+		});
+	}
+
 	dmConversation(conversationId: string): Promise<unknown> {
 		return this._v11Get("dm/conversation/" + conversationId + ".json", {});
 	}

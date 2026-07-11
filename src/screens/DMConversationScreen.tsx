@@ -146,6 +146,11 @@ export default class DMConversationScreen extends Component<
 							return m.id;
 						}}
 						renderItem={this._renderItem}
+						ListHeaderComponent={
+							<Text style={[styles.encNotice, { color: c.textTertiary }]}>
+								🔒 End-to-end encrypted (X Chat) messages can’t be shown here.
+							</Text>
+						}
 						onContentSizeChange={function () {
 							if (self._list && messages.length) self._list.scrollToEnd({ animated: false });
 						}}
@@ -190,6 +195,7 @@ export default class DMConversationScreen extends Component<
 
 const styles = StyleSheet.create<{
 	center: ViewStyle;
+	encNotice: TextStyle;
 	listContent: ViewStyle;
 	bubbleRow: ViewStyle;
 	rowMine: ViewStyle;
@@ -202,6 +208,14 @@ const styles = StyleSheet.create<{
 	sendDisabled: ViewStyle;
 }>({
 	center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 40 },
+	encNotice: {
+		fontSize: 12,
+		textAlign: "center",
+		paddingHorizontal: 24,
+		paddingTop: 4,
+		paddingBottom: 14,
+		lineHeight: 17
+	},
 	listContent: { paddingVertical: 10, paddingHorizontal: 10 },
 	bubbleRow: { flexDirection: "row", marginVertical: 3 },
 	rowMine: { justifyContent: "flex-end" },

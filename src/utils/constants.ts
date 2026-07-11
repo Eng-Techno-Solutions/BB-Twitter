@@ -63,8 +63,8 @@ export const X_GQL = {
 	// (cookie/OAuth2Session auth) — the legacy REST /1.1/account/verify_credentials
 	// endpoint returns 404 code 34 under cookie auth, so it is NOT usable here.
 	Viewer: ["okNaf-6AQWu2DD2H_MAoVw", "Viewer"],
-	HomeTimeline: ["HBoyagpQGT-Wgme3-8g_1w", "HomeTimeline"],
-	HomeLatestTimeline: ["-hEd_ceQGP4cGb90UGxT5g", "HomeLatestTimeline"],
+	HomeTimeline: ["HCosKfLNW1AcOo3la3mMgg", "HomeTimeline"],
+	HomeLatestTimeline: ["zhX91JE87mWvfprhYE97xA", "HomeLatestTimeline"],
 	TweetDetail: ["QuBlQ6SxNAQCt6-kBiCXCQ", "TweetDetail"],
 	UserByScreenName: ["G3KGOASz96M-Qu0nwmGXNg", "UserByScreenName"],
 	UserTweets: ["V7H0Ap3_Hh2FyS75OCDO3Q", "UserTweets"],
