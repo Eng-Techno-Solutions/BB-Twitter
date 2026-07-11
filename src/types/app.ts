@@ -38,6 +38,7 @@ export interface AppState {
 	themeMode: ThemeMode;
 	notifInterval: number;
 	notifEnabled: boolean;
+	mentionsOnly: boolean;
 	soundEnabled: boolean;
 	fontSize: FontSizeKey;
 	unreadNotifications: number;

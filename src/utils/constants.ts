@@ -5,6 +5,7 @@ export const STORAGE_KEYS = {
 	THEME: "@BBTwitter:theme",
 	NOTIF_INTERVAL: "@BBTwitter:notifInterval",
 	NOTIF_ENABLED: "@BBTwitter:notifEnabled",
+	NOTIF_MENTIONS_ONLY: "@BBTwitter:notifMentionsOnly",
 	SOUND_ENABLED: "@BBTwitter:soundEnabled",
 	FONT_SIZE: "@BBTwitter:fontSize",
 	ACCOUNTS: "@BBTwitter:accounts",

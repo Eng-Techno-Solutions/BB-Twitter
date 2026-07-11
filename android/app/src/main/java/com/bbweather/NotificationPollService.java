@@ -21,8 +21,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Iterator;
 
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLSocketFactory;
@@ -31,19 +30,49 @@ import javax.net.ssl.SSLSocketFactory;
 // one-shot, this keeps its own process alive and polls on a fixed cadence, so
 // it survives the app being swiped from recents on BlackBerry 10's Android
 // runtime (which does not reliably wake a dead process for alarms).
+//
+// Mirrors BBSlack's NotificationPollService one-to-one — same HandlerThread
+// loop, foreground suppression, per-account diff-against-baseline, and Settings
+// diagnostics — retargeted from Slack's unread-count model to X's two feeds:
+// the activity notifications timeline and the DM inbox.
 public class NotificationPollService extends Service {
 
-    private static final String SLACK_API = "https://slack.com/api/";
+    // X's public web-app bearer (shipped in x.com's JS, identical for every
+    // user — NOT a secret). The per-user credential is the auth_token + ct0
+    // pair carried in the Cookie header. Kept in sync with X_WEB_BEARER in
+    // src/utils/constants.ts.
+    private static final String X_BEARER =
+        "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+    // Direct hosts (the web dev proxy is web-only). v2 hosts the notifications
+    // timeline; v1.1 hosts the DM inbox — same split as xapi.ts.
+    private static final String V2_API = "https://x.com/i/api/2/";
+    private static final String V11_API = "https://api.x.com/1.1/";
+    // Enrichment params for notifications/all.json, mirroring NOTIFICATION_TWEET_PARAMS
+    // in xapi.ts (pre-URL-encoded). Without them X returns skeletal tweets.
+    private static final String NOTIF_PARAMS =
+        "include_profile_interstitial_type=1&include_blocking=1&include_blocked_by=1"
+        + "&include_followed_by=1&include_want_retweets=1&include_mute_edge=1&include_can_dm=1"
+        + "&include_can_media_tag=1&include_ext_is_blue_verified=1&include_ext_verified_type=1"
+        + "&skip_status=1&cards_platform=Web-12&include_cards=1&include_ext_alt_text=true"
+        + "&include_quote_count=true&include_reply_count=1&tweet_mode=extended"
+        + "&include_ext_views=true&include_entities=true&include_user_entities=true"
+        + "&include_ext_media_availability=true&send_error_codes=true&simple_quoted_tweet=true"
+        + "&count=40&ext=mediaStats%2ChighlightedLabel%2CvoiceInfo%2CbirdwatchPivot"
+        + "%2CsuperFollowMetadata%2CeditControl";
+
     private static final int BASE_NOTIF_ID = 9000;
-    private static final String CHANNEL_ID = "bbslack_messages";
-    private static final String CHANNEL_NAME = "Messages";
+    private static final String CHANNEL_ID = "bbtwitter_activity";
+    private static final String CHANNEL_NAME = "Activity";
     private static final String TAG = "BBTwitterNotif";
     private static final long POLL_INTERVAL_MS = 2 * 60 * 1000;
-    // conversations.info is Tier 3 (50+/min); this cap keeps one poll cycle
-    // inside a single minute's budget.
-    private static final int MAX_DMS_PER_POLL = 40;
+    private static final int MAX_POSTS_PER_POLL = 6;
     private static final int MAX_PREVIEW_CHARS = 160;
-    private static final Pattern MENTION_PATTERN = Pattern.compile("<@([A-Z0-9]+)(\\|[^>]*)?>");
+
+    // lastUnreads keys are namespaced by type so the feed high-water mark and
+    // per-conversation DM high-water marks share one SharedPreferences blob
+    // without colliding (BBSlack used userId:channelId; we add a type prefix).
+    private static final String NOTIF_HWM_PREFIX = "n:";   // n:<userId>       -> max timestampMs seen
+    private static final String DM_HWM_PREFIX = "d:";       // d:<userId>:<conv> -> max entry id seen
 
     private HandlerThread pollThread;
     private Handler pollHandler;
@@ -112,23 +141,17 @@ public class NotificationPollService extends Service {
             return;
         }
 
-        // While the app is in the foreground, the in-app JS poller and RTM
-        // socket already deliver updates. Skip notifications to avoid duplicates,
-        // but still refresh the baseline so the first post-background tick has
-        // an accurate diff.
+        // While the app is in the foreground, the in-app JS badge poller already
+        // refreshes counts. Skip posting to avoid duplicates, but still advance
+        // the baseline so the first post-background tick has an accurate diff.
         boolean foreground = MainActivity.isForeground();
         Log.d(TAG, "foreground=" + foreground);
+        boolean mentionsOnly = NotificationModule.isChannelsMentionOnly(this);
+        boolean multiAccount = accounts.length() > 1;
 
         JSONObject newUnreads = new JSONObject();
-        int notifIndex = 0;
+        int[] notifIndex = new int[] { 0 };
         JSONArray results = new JSONArray();
-
-        JSONObject nameCache;
-        try {
-            nameCache = new JSONObject(NotificationModule.getUserNames(this));
-        } catch (Exception e) {
-            nameCache = new JSONObject();
-        }
 
         NotificationManager notifManager = (NotificationManager)
             getSystemService(Context.NOTIFICATION_SERVICE);
@@ -142,91 +165,40 @@ public class NotificationPollService extends Service {
             String userId = "";
             try {
                 JSONObject account = accounts.getJSONObject(i);
-                String token = account.optString("token", "");
-                String teamName = account.optString("teamName", "");
+                String authToken = account.optString("authToken", "");
+                String csrf = account.optString("csrf", "");
                 userId = account.optString("userId", "");
+                String handle = account.optString("handle", "");
+                String label = multiAccount && !handle.isEmpty() ? " — @" + handle : "";
 
-                if (token.isEmpty()) {
-                    results.put(userId + ": ERROR empty token");
+                if (authToken.isEmpty() || csrf.isEmpty()) {
+                    results.put(userId + ": ERROR missing session");
                     continue;
                 }
 
-                JSONArray channels = fetchConversations(token);
-                Log.d(TAG, "Fetched " + channels.length() + " conversations for " + userId);
-
-                // users.counts (the endpoint Slack's own mobile clients used —
-                // same undocumented family as the auth.signin login this app
-                // already relies on) returns unread counts for channels,
-                // groups, and DMs in a single call. If the token is rejected,
-                // fall back to per-DM conversations.info, which is documented
-                // but covers DMs only.
-                JSONObject countsById;
-                String mode;
+                int postedBefore = notifIndex[0];
+                // Poll each feed independently so a failure in one (endpoint down,
+                // rate limit) neither blocks the other nor sinks the whole account.
+                String feedResult;
                 try {
-                    countsById = fetchAllCounts(token);
-                    mode = NotificationModule.isChannelsMentionOnly(this)
-                        ? "counts/mentions" : "counts";
-                } catch (Exception countsError) {
-                    countsById = fetchDmCounts(token, channels);
-                    mode = "dm-only (counts: " + countsError.getMessage() + ")";
+                    int feedNew = pollFeed(authToken, csrf, userId, label, mentionsOnly,
+                        foreground, lastUnreads, newUnreads, notifIndex);
+                    feedResult = "feedNew=" + feedNew;
+                } catch (Exception feedErr) {
+                    feedResult = "feedERR=" + feedErr.getMessage();
+                }
+                String dmResult;
+                try {
+                    int dmNew = pollDms(authToken, csrf, userId, label,
+                        foreground, lastUnreads, newUnreads, notifIndex);
+                    dmResult = "dmNew=" + dmNew;
+                } catch (Exception dmErr) {
+                    dmResult = "dmERR=" + dmErr.getMessage();
                 }
 
-                int unreadConvos = 0;
-                int postedBefore = notifIndex;
-
-                for (int j = 0; j < channels.length(); j++) {
-                    JSONObject ch = channels.getJSONObject(j);
-                    String channelId = ch.optString("id", "");
-                    int unreadCount = countsById.optInt(channelId, 0);
-                    if (unreadCount <= 0) continue;
-
-                    boolean isIm = ch.optBoolean("is_im", false);
-                    boolean isMpim = ch.optBoolean("is_mpim", false);
-                    if (!isIm && !isMpim && !ch.optBoolean("is_member", false)) continue;
-
-                    unreadConvos++;
-                    String key = userId + ":" + channelId;
-                    int prevCount = lastUnreads.optInt(key, 0);
-
-                    try {
-                        newUnreads.put(key, unreadCount);
-                    } catch (Exception e) {
-                        // ignore
-                    }
-
-                    if (!foreground && unreadCount > prevCount) {
-                        int newMessages = unreadCount - prevCount;
-                        String channelName = "#" + ch.optString("name", channelId);
-                        String title = isIm ? "New DM" : (isMpim ? "Group DM" : channelName);
-                        String body = newMessages + " new message" + (newMessages > 1 ? "s" : "");
-
-                        // Best-effort: show who wrote what instead of a bare
-                        // count. Only runs for conversations that just gained
-                        // unreads, so it adds at most a couple of calls per poll.
-                        String[] preview = fetchMessagePreview(token, channelId, nameCache);
-                        if (preview != null) {
-                            String sender = preview[0];
-                            String text = preview[1];
-                            if (isIm || isMpim) {
-                                if (!sender.isEmpty()) title = sender + (isMpim ? " (group)" : "");
-                                body = text;
-                            } else {
-                                body = sender.isEmpty() ? text : sender + ": " + text;
-                            }
-                            if (newMessages > 1) {
-                                body += " (+" + (newMessages - 1) + " more)";
-                            }
-                        }
-
-                        if (!teamName.isEmpty()) title += " — " + teamName;
-                        postNotification(this, BASE_NOTIF_ID + notifIndex, title, body);
-                        notifIndex++;
-                    }
-                }
-
-                results.put(userId + ": " + channels.length() + " convos, mode="
-                    + mode + ", unread=" + unreadConvos
-                    + ", posted=" + (notifIndex - postedBefore));
+                results.put(userId + ": " + feedResult + ", " + dmResult
+                    + ", posted=" + (notifIndex[0] - postedBefore)
+                    + (mentionsOnly ? ", mentionsOnly" : ""));
             } catch (Exception e) {
                 Log.w(TAG, "Poll failed for account " + userId, e);
                 results.put(userId + ": ERROR " + e.getClass().getSimpleName()
@@ -236,7 +208,207 @@ public class NotificationPollService extends Service {
 
         saveDiag(foreground, accounts.length(), results);
         NotificationModule.setLastUnreads(this, newUnreads.toString());
-        NotificationModule.setUserNames(this, nameCache.toString());
+    }
+
+    // ---- Activity feed (notifications/all.json) -----------------------------
+
+    // Diffs the notifications timeline against the per-account high-water mark
+    // (max timestampMs seen). First poll seeds the baseline and posts nothing,
+    // so a fresh login doesn't dump the whole backlog. Returns the count of new
+    // entries seen (posted only when backgrounded).
+    private int pollFeed(String authToken, String csrf, String userId, String label,
+                         boolean mentionsOnly, boolean foreground,
+                         JSONObject lastUnreads, JSONObject newUnreads, int[] notifIndex)
+                         throws Exception {
+        JSONObject response = xGet(V2_API, "notifications/all.json?" + NOTIF_PARAMS, authToken, csrf);
+        JSONObject globals = response.optJSONObject("globalObjects");
+        if (globals == null) return 0;
+        JSONObject notifications = globals.optJSONObject("notifications");
+        JSONObject tweets = globals.optJSONObject("tweets");
+        if (notifications == null) notifications = new JSONObject();
+        if (tweets == null) tweets = new JSONObject();
+
+        String hwmKey = NOTIF_HWM_PREFIX + userId;
+        long prevHwm = lastUnreads.optLong(hwmKey, -1);
+        boolean seeding = prevHwm < 0;
+        long maxSeen = prevHwm < 0 ? 0 : prevHwm;
+        int newCount = 0;
+
+        Iterator<String> ids = notifications.keys();
+        while (ids.hasNext()) {
+            String notifId = ids.next();
+            JSONObject notif = notifications.optJSONObject(notifId);
+            if (notif == null) continue;
+
+            long ts = parseLongSafe(notif.optString("timestampMs", "0"));
+            if (ts <= 0) continue;
+            if (ts > maxSeen) maxSeen = ts;
+            if (seeding || ts <= prevHwm) continue; // already seen (or baseline)
+
+            String iconId = notif.optJSONObject("icon") != null
+                ? notif.optJSONObject("icon").optString("id", "") : "";
+            boolean isMention = iconId.contains("mention") || iconId.contains("reply");
+            if (mentionsOnly && !isMention) continue;
+
+            newCount++;
+            if (foreground || notifIndex[0] >= MAX_POSTS_PER_POLL) continue;
+
+            String title = notif.optJSONObject("message") != null
+                ? notif.optJSONObject("message").optString("text", "") : "";
+            if (title.isEmpty()) title = "New activity";
+            String body = tweetTextFor(notif, tweets);
+            if (label != null && !label.isEmpty()) title += label;
+
+            postNotification(this, BASE_NOTIF_ID + notifIndex[0], title, body);
+            notifIndex[0]++;
+        }
+
+        putLong(newUnreads, hwmKey, maxSeen);
+        return newCount;
+    }
+
+    // Resolves a notification's target tweet text for the notification body.
+    // The tweet id lives in template.aggregateUserActionsV1.targetObjects (or the
+    // template directly); the text is the legacy tweet's full_text/text. Returns
+    // "" when there's no associated tweet (e.g. a bare follow).
+    private String tweetTextFor(JSONObject notif, JSONObject tweets) {
+        JSONObject template = notif.optJSONObject("template");
+        if (template == null) return "";
+        JSONObject agg = template.optJSONObject("aggregateUserActionsV1");
+        JSONObject actions = agg != null ? agg : template;
+        JSONArray targets = actions.optJSONArray("targetObjects");
+        String tweetId = "";
+        if (targets != null) {
+            for (int i = 0; i < targets.length(); i++) {
+                JSONObject t = targets.optJSONObject(i);
+                JSONObject tw = t != null ? t.optJSONObject("tweet") : null;
+                if (tw != null && !tw.optString("id", "").isEmpty()) {
+                    tweetId = tw.optString("id", "");
+                    break;
+                }
+            }
+        }
+        if (tweetId.isEmpty()) return "";
+        JSONObject tweet = tweets.optJSONObject(tweetId);
+        if (tweet == null) return "";
+        String text = tweet.optString("full_text", tweet.optString("text", ""));
+        return truncate(text.trim());
+    }
+
+    // ---- Direct messages (dm/inbox_initial_state.json) ----------------------
+
+    // Diffs each conversation's max_entry_id against its stored high-water mark.
+    // Posts the newest inbound message when a conversation advances. First sight
+    // of a conversation seeds silently. Returns the count of conversations that
+    // advanced (posted only when backgrounded).
+    private int pollDms(String authToken, String csrf, String userId, String label,
+                        boolean foreground, JSONObject lastUnreads,
+                        JSONObject newUnreads, int[] notifIndex) throws Exception {
+        JSONObject response = xGet(V11_API,
+            "dm/inbox_initial_state.json?include_conversation_info=true&dm_users=false",
+            authToken, csrf);
+        JSONObject root = response.optJSONObject("inbox_initial_state");
+        if (root == null) return 0;
+        JSONObject users = root.optJSONObject("users");
+        JSONObject conversations = root.optJSONObject("conversations");
+        JSONArray entries = root.optJSONArray("entries");
+        if (conversations == null) return 0;
+        if (users == null) users = new JSONObject();
+
+        int newCount = 0;
+        Iterator<String> convIds = conversations.keys();
+        while (convIds.hasNext()) {
+            String convId = convIds.next();
+            JSONObject conv = conversations.optJSONObject(convId);
+            if (conv == null) continue;
+
+            long maxEntry = parseLongSafe(conv.optString("max_entry_id", "0"));
+            if (maxEntry <= 0) continue;
+
+            String hwmKey = DM_HWM_PREFIX + userId + ":" + convId;
+            long prevHwm = lastUnreads.optLong(hwmKey, -1);
+            putLong(newUnreads, hwmKey, maxEntry);
+            if (prevHwm < 0 || maxEntry <= prevHwm) continue; // seeding or unchanged
+
+            newCount++;
+            if (foreground || notifIndex[0] >= MAX_POSTS_PER_POLL) continue;
+
+            JSONObject latest = latestInboundMessage(entries, convId, userId);
+            if (latest == null) continue;
+            JSONObject data = latest.optJSONObject("message_data");
+            if (data == null) continue;
+
+            String senderId = data.optString("sender_id", "");
+            String title = senderDisplayName(users, senderId);
+            if (title.isEmpty()) title = "New message";
+            String body = truncate(data.optString("text", "").trim());
+            if (body.isEmpty()) body = "Sent a message";
+            if (label != null && !label.isEmpty()) title += label;
+
+            postNotification(this, BASE_NOTIF_ID + notifIndex[0], title, body);
+            notifIndex[0]++;
+        }
+        return newCount;
+    }
+
+    // Newest message in a conversation authored by someone other than us. The
+    // inbox entries stream is flat across all conversations, so filter by
+    // conversation_id and skip our own sends (self-echo shouldn't notify).
+    private JSONObject latestInboundMessage(JSONArray entries, String convId, String selfId) {
+        if (entries == null) return null;
+        JSONObject best = null;
+        long bestTime = -1;
+        for (int i = 0; i < entries.length(); i++) {
+            JSONObject entry = entries.optJSONObject(i);
+            JSONObject message = entry != null ? entry.optJSONObject("message") : null;
+            if (message == null) continue;
+            JSONObject data = message.optJSONObject("message_data");
+            if (data == null) continue;
+            if (!convId.equals(message.optString("conversation_id", ""))) continue;
+            if (selfId.equals(data.optString("sender_id", ""))) continue;
+            long time = parseLongSafe(data.optString("time", "0"));
+            if (time >= bestTime) {
+                bestTime = time;
+                best = message;
+            }
+        }
+        return best;
+    }
+
+    private String senderDisplayName(JSONObject users, String senderId) {
+        if (senderId.isEmpty()) return "";
+        JSONObject user = users.optJSONObject(senderId);
+        if (user == null) return "";
+        String name = user.optString("name", "");
+        if (!name.isEmpty()) return name;
+        String handle = user.optString("screen_name", "");
+        return handle.isEmpty() ? "" : "@" + handle;
+    }
+
+    // ---- Shared helpers -----------------------------------------------------
+
+    private String truncate(String text) {
+        if (text == null) return "";
+        if (text.length() > MAX_PREVIEW_CHARS) {
+            return text.substring(0, MAX_PREVIEW_CHARS - 1) + "…";
+        }
+        return text;
+    }
+
+    private long parseLongSafe(String value) {
+        try {
+            return Long.parseLong(value.trim());
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private void putLong(JSONObject obj, String key, long value) {
+        try {
+            obj.put(key, value);
+        } catch (Exception e) {
+            // ignore — a single lost high-water mark just re-seeds next poll
+        }
     }
 
     // Persist a one-line-per-account poll report so the Settings screen can
@@ -255,172 +427,14 @@ public class NotificationPollService extends Service {
         }
     }
 
-    private JSONArray fetchConversations(String token) throws Exception {
-        JSONObject response = slackGet(token,
-            "conversations.list?types=public_channel,private_channel,mpim,im"
-            + "&exclude_archived=true&limit=200");
-        JSONArray channels = response.optJSONArray("channels");
-        if (channels == null) throw new Exception("Slack API: no channels array");
-        return channels;
-    }
-
-    private JSONObject fetchConversationInfo(String token, String channelId) throws Exception {
-        JSONObject response = slackGet(token, "conversations.info?channel=" + channelId);
-        JSONObject channel = response.optJSONObject("channel");
-        if (channel == null) throw new Exception("Slack API: no channel object");
-        return channel;
-    }
-
-    // users.counts is undocumented; parse defensively. Returns a flat map of
-    // conversation id -> unread count across channels, groups, mpims, and ims.
-    // When the user enables mentions-only, channels and groups count only
-    // @mentions; DMs and group DMs always count every message.
-    private JSONObject fetchAllCounts(String token) throws Exception {
-        JSONObject response = slackGet(token, "users.counts?mpim_aware=true");
-        boolean mentionOnly = NotificationModule.isChannelsMentionOnly(this);
-        JSONObject countsById = new JSONObject();
-        mergeCounts(countsById, response.optJSONArray("channels"), mentionOnly);
-        mergeCounts(countsById, response.optJSONArray("groups"), mentionOnly);
-        mergeCounts(countsById, response.optJSONArray("mpims"), false);
-        mergeCounts(countsById, response.optJSONArray("ims"), false);
-        return countsById;
-    }
-
-    private void mergeCounts(JSONObject countsById, JSONArray entries, boolean mentionOnly) {
-        if (entries == null) return;
-        for (int i = 0; i < entries.length(); i++) {
-            JSONObject entry = entries.optJSONObject(i);
-            if (entry == null) continue;
-            String id = entry.optString("id", "");
-            if (id.isEmpty()) continue;
-            int count;
-            if (mentionOnly) {
-                count = entry.optInt("mention_count_display", entry.optInt("mention_count", 0));
-            } else {
-                // Field name varies by conversation type: channels/groups use
-                // unread_count_display, ims use dm_count.
-                count = entry.optInt("unread_count_display",
-                    entry.optInt("dm_count", entry.optInt("mention_count_display", 0)));
-            }
-            if (count <= 0) continue;
-            try {
-                countsById.put(id, count);
-            } catch (Exception e) {
-                // ignore
-            }
-        }
-    }
-
-    // Documented fallback: conversations.info exposes unread_count_display for
-    // DMs/group DMs only, one call per conversation.
-    private JSONObject fetchDmCounts(String token, JSONArray channels) {
-        JSONObject countsById = new JSONObject();
-        int checked = 0;
-        for (int i = 0; i < channels.length(); i++) {
-            JSONObject ch = channels.optJSONObject(i);
-            if (ch == null) continue;
-            if (!ch.optBoolean("is_im", false) && !ch.optBoolean("is_mpim", false)) continue;
-            if (checked >= MAX_DMS_PER_POLL) break;
-            checked++;
-
-            String channelId = ch.optString("id", "");
-            try {
-                JSONObject info = fetchConversationInfo(token, channelId);
-                int count = info.optInt("unread_count_display", 0);
-                if (count > 0) countsById.put(channelId, count);
-            } catch (Exception e) {
-                // One bad conversation must not sink the poll
-            }
-        }
-        return countsById;
-    }
-
-    // Fetches the newest message of a conversation so the notification can say
-    // who wrote what. Returns {senderName, text} or null; any failure means the
-    // caller keeps the plain "N new messages" body.
-    private String[] fetchMessagePreview(String token, String channelId, JSONObject nameCache) {
-        try {
-            JSONObject response = slackGet(token,
-                "conversations.history?channel=" + channelId + "&limit=1");
-            JSONArray messages = response.optJSONArray("messages");
-            if (messages == null || messages.length() == 0) return null;
-            JSONObject message = messages.getJSONObject(0);
-
-            String sender = resolveSenderName(token, message, nameCache);
-            String text = cleanSlackText(message.optString("text", ""), token, nameCache);
-            if (text.isEmpty()) text = describeNonTextMessage(message);
-            if (text.isEmpty()) return null;
-            if (text.length() > MAX_PREVIEW_CHARS) {
-                text = text.substring(0, MAX_PREVIEW_CHARS - 1) + "…";
-            }
-            return new String[] { sender, text };
-        } catch (Exception e) {
-            Log.w(TAG, "Preview fetch failed for " + channelId + ": " + e.getMessage());
-            return null;
-        }
-    }
-
-    private String resolveSenderName(String token, JSONObject message, JSONObject nameCache) {
-        String senderId = message.optString("user", "");
-        // Bot/app messages carry a username instead of a user id.
-        if (senderId.isEmpty()) return message.optString("username", "");
-        return resolveUserName(token, senderId, nameCache);
-    }
-
-    // Resolves a user id to a display name via the persistent cache, falling
-    // back to one users.info call. Returns "" when the name can't be resolved.
-    private String resolveUserName(String token, String userId, JSONObject nameCache) {
-        String cached = nameCache.optString(userId, "");
-        if (!cached.isEmpty()) return cached;
-        try {
-            JSONObject response = slackGet(token, "users.info?user=" + userId);
-            JSONObject user = response.optJSONObject("user");
-            if (user == null) return "";
-            JSONObject profile = user.optJSONObject("profile");
-            String name = profile != null ? profile.optString("display_name", "") : "";
-            if (name.isEmpty() && profile != null) name = profile.optString("real_name", "");
-            if (name.isEmpty()) name = user.optString("real_name", "");
-            if (name.isEmpty()) name = user.optString("name", "");
-            if (!name.isEmpty()) nameCache.put(userId, name);
-            return name;
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    // Strips Slack's message markup (<@U..>, <#C..|name>, <url|label>, HTML
-    // entities) down to plain text fit for a one-line notification.
-    private String cleanSlackText(String raw, String token, JSONObject nameCache) {
-        if (raw == null) return "";
-        Matcher mention = MENTION_PATTERN.matcher(raw);
-        StringBuffer resolved = new StringBuffer();
-        while (mention.find()) {
-            String name = resolveUserName(token, mention.group(1), nameCache);
-            mention.appendReplacement(resolved,
-                Matcher.quoteReplacement("@" + (name.isEmpty() ? "user" : name)));
-        }
-        mention.appendTail(resolved);
-        String text = resolved.toString();
-        text = text.replaceAll("<#[A-Z0-9]+\\|([^>]*)>", "#$1");
-        text = text.replaceAll("<[^>|]+\\|([^>]*)>", "$1");
-        text = text.replaceAll("<([^>]+)>", "$1");
-        text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
-        return text.trim();
-    }
-
-    private String describeNonTextMessage(JSONObject message) {
-        if (message.optJSONArray("files") != null) return "Sent a file";
-        if (message.optJSONArray("attachments") != null) return "Sent an attachment";
-        return "New message";
-    }
-
-    // Throws with a specific reason (TLS failure, HTTP code, Slack API error)
-    // so pollOnce can surface it in the diagnostics report instead of failing
-    // silently.
-    private JSONObject slackGet(String token, String pathAndQuery) throws Exception {
+    // X's cookie-authed GET, mirroring xapi.ts#_headers on native (static bearer
+    // + ct0 csrf header + auth_token/ct0 cookie). Throws with a specific reason
+    // (TLS failure, HTTP code) so pollOnce can surface it in diagnostics.
+    private JSONObject xGet(String base, String pathAndQuery, String authToken, String csrf)
+            throws Exception {
         HttpURLConnection conn = null;
         try {
-            URL url = new URL(SLACK_API + pathAndQuery);
+            URL url = new URL(base + pathAndQuery);
             conn = (HttpURLConnection) url.openConnection();
 
             if (conn instanceof HttpsURLConnection) {
@@ -433,7 +447,13 @@ public class NotificationPollService extends Service {
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(15000);
-            conn.setRequestProperty("Authorization", "Bearer " + token);
+            conn.setRequestProperty("Authorization", X_BEARER);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("x-csrf-token", csrf);
+            conn.setRequestProperty("x-twitter-auth-type", "OAuth2Session");
+            conn.setRequestProperty("x-twitter-active-user", "yes");
+            conn.setRequestProperty("x-twitter-client-language", "en");
+            conn.setRequestProperty("Cookie", "auth_token=" + authToken + "; ct0=" + csrf);
 
             int code = conn.getResponseCode();
             if (code != 200) throw new Exception("HTTP " + code);
@@ -448,11 +468,7 @@ public class NotificationPollService extends Service {
             }
             reader.close();
 
-            JSONObject response = new JSONObject(sb.toString());
-            if (!response.optBoolean("ok", false)) {
-                throw new Exception("Slack API: " + response.optString("error", "unknown"));
-            }
-            return response;
+            return new JSONObject(sb.toString());
         } finally {
             if (conn != null) conn.disconnect();
         }

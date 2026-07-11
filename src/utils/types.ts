@@ -4,15 +4,6 @@ export interface AsyncStorageInterface {
 	removeItem(key: string): Promise<void>;
 }
 
-export interface NotificationModuleInterface {
-	startService(token: string, userId: string, usersJson: string, intervalMs: number): void;
-	stopService(): void;
-	setAppForeground(foreground: boolean): void;
-	showNotification(title: string, body: string, channelId: string | null): void;
-	cancelAll(): void;
-	clearUnreadTracking(): void;
-}
-
 export interface AudioRecorderModuleInterface {
 	startRecording(): Promise<string>;
 	stopRecording(): Promise<string>;

@@ -22,6 +22,12 @@ import {
 	tryAutoLogin,
 	upsertAccount
 } from "./src/services/accountManager";
+import {
+	startBackgroundNotifications,
+	stopBackgroundNotifications,
+	syncAccountsToNative,
+	syncMentionsOnlyToNative
+} from "./src/services/nativeNotification";
 import { loadUnreadCount } from "./src/services/notificationsService";
 import type { HomeTab } from "./src/services/timelineLoader";
 import { clearViews } from "./src/services/viewCache";
@@ -33,18 +39,20 @@ import { clearToken, logger } from "./src/utils";
 import { errorMessage } from "./src/utils/error";
 import {
 	getFontSize,
+	getMentionsOnly,
 	getNotifEnabled,
 	getSoundEnabled,
 	getTheme,
 	saveFontSize,
+	saveMentionsOnly,
 	saveNotifEnabled,
 	saveSoundEnabled,
 	saveTheme
 } from "./src/utils/storage";
 import type { XSession } from "./src/utils/storage";
 import React, { Component } from "react";
-import { ActivityIndicator, BackHandler, StatusBar, View } from "react-native";
-import type { NativeEventSubscription } from "react-native";
+import { ActivityIndicator, AppState, BackHandler, StatusBar, View } from "react-native";
+import type { AppStateStatus, NativeEventSubscription } from "react-native";
 
 const TAB_SCREEN: Record<TabKey, string> = {
 	home: "home",
@@ -60,6 +68,7 @@ const TAB_ROOTS = ["home", "search", "notifications", "messages", "profile"];
 export default class App extends Component<Props, State> {
 	_backHandler: NativeEventSubscription | null;
 	_badgeTimer: ReturnType<typeof setInterval> | null;
+	_appStateListener: NativeEventSubscription | null;
 
 	constructor(props: Props) {
 		super(props);
@@ -74,12 +83,14 @@ export default class App extends Component<Props, State> {
 			themeMode: "dark",
 			notifInterval: 120000,
 			notifEnabled: true,
+			mentionsOnly: false,
 			soundEnabled: true,
 			fontSize: "medium",
 			unreadNotifications: 0
 		};
 		this._backHandler = null;
 		this._badgeTimer = null;
+		this._appStateListener = null;
 	}
 
 	componentDidMount(): void {
@@ -90,11 +101,29 @@ export default class App extends Component<Props, State> {
 		this._backHandler = BackHandler.addEventListener("hardwareBackPress", function () {
 			return self._onHardwareBack();
 		});
+		// The in-app badge poller is foreground-only (like BBSlack's JS poller);
+		// the native service owns the background path, so pause the timer when
+		// backgrounded and resume on return.
+		this._appStateListener = AppState.addEventListener("change", function (status: AppStateStatus) {
+			self._handleAppState(status);
+		});
 	}
 
 	componentWillUnmount(): void {
 		if (this._backHandler) this._backHandler.remove();
+		if (this._appStateListener) this._appStateListener.remove();
 		this._stopBadgePolling();
+	}
+
+	// Native background polling is driven by setAccounts + the notif toggle, NOT
+	// by AppState (matching BBSlack) — so swipe-kill from recents still leaves the
+	// service armed. AppState only gates the foreground JS badge poller.
+	_handleAppState(status: AppStateStatus): void {
+		if (status === "active") {
+			if (this.state.api) this._startBadgePolling(this.state.api);
+		} else if (status === "background") {
+			this._stopBadgePolling();
+		}
 	}
 
 	// ── Unread badge ───────────────────────────────────────
@@ -147,10 +176,21 @@ export default class App extends Component<Props, State> {
 	async _initSettings(): Promise<void> {
 		try {
 			const notifEnabled = await getNotifEnabled();
+			const mentionsOnly = await getMentionsOnly();
 			const soundEnabled = await getSoundEnabled();
 			const fontSize = await getFontSize();
 			setFontSizeKey(fontSize);
-			this.setState({ notifEnabled: notifEnabled, soundEnabled: soundEnabled, fontSize: fontSize });
+			// Re-sync the mentions-only pref to native every launch so it survives
+			// a reinstall, and stop the native service if the user disabled
+			// notifications (setAccounts auto-arms it on login).
+			syncMentionsOnlyToNative(mentionsOnly);
+			if (!notifEnabled) stopBackgroundNotifications();
+			this.setState({
+				notifEnabled: notifEnabled,
+				mentionsOnly: mentionsOnly,
+				soundEnabled: soundEnabled,
+				fontSize: fontSize
+			});
 		} catch (err: unknown) {
 			logger.warn("App.initSettings", "failed to load settings", err);
 		}
@@ -167,6 +207,18 @@ export default class App extends Component<Props, State> {
 		const enabled = !this.state.notifEnabled;
 		this.setState({ notifEnabled: enabled });
 		saveNotifEnabled(enabled);
+		if (enabled) {
+			if (this.state.accounts.length > 0) startBackgroundNotifications();
+		} else {
+			stopBackgroundNotifications();
+		}
+	};
+
+	_toggleMentionsOnly = (): void => {
+		const enabled = !this.state.mentionsOnly;
+		this.setState({ mentionsOnly: enabled });
+		saveMentionsOnly(enabled);
+		syncMentionsOnlyToNative(enabled);
 	};
 
 	_toggleSound = (): void => {
@@ -212,6 +264,10 @@ export default class App extends Component<Props, State> {
 		const api = new XAPI(session);
 		const accounts = upsertAccount(this.state.accounts, user, session);
 		await persistAccountLogin(accounts, user.id);
+		// Hand the updated account list to the native poll service (which starts
+		// the background service when the list is non-empty). Gated by the notif
+		// toggle so a disabled user doesn't get polled.
+		if (this.state.notifEnabled) syncAccountsToNative(accounts);
 		// New session boundary (login / account switch): drop the previous
 		// account's cached views so we never render them under the new user.
 		clearViews();
@@ -232,6 +288,8 @@ export default class App extends Component<Props, State> {
 			this.state.accounts,
 			this.state.currentUser ? this.state.currentUser.id : ""
 		);
+		// Re-sync remaining accounts; an empty list stops the native service.
+		syncAccountsToNative(accounts);
 		await clearToken();
 		clearViews();
 		this.setState(Object.assign({}, getResetState(), { accounts: accounts, initializing: false }));
@@ -424,10 +482,12 @@ export default class App extends Component<Props, State> {
 					<SettingsScreen
 						themeMode={state.themeMode}
 						notifEnabled={state.notifEnabled}
+						mentionsOnly={state.mentionsOnly}
 						soundEnabled={state.soundEnabled}
 						fontSize={state.fontSize}
 						onToggleTheme={this._toggleTheme}
 						onToggleNotif={this._toggleNotif}
+						onToggleMentionsOnly={this._toggleMentionsOnly}
 						onToggleSound={this._toggleSound}
 						onChangeFontSize={this._changeFontSize}
 						onBookmarks={() => {

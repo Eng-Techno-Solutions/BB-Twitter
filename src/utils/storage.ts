@@ -92,6 +92,15 @@ export async function getNotifEnabled(): Promise<boolean> {
 	return val !== "0";
 }
 
+export async function saveMentionsOnly(enabled: boolean): Promise<void> {
+	await setItem(STORAGE_KEYS.NOTIF_MENTIONS_ONLY, enabled ? "1" : "0");
+}
+
+export async function getMentionsOnly(): Promise<boolean> {
+	const val = await getItem(STORAGE_KEYS.NOTIF_MENTIONS_ONLY);
+	return val === "1";
+}
+
 export async function saveSoundEnabled(enabled: boolean): Promise<void> {
 	await setItem(STORAGE_KEYS.SOUND_ENABLED, enabled ? "1" : "0");
 }

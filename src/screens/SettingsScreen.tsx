@@ -1,4 +1,9 @@
 import { Header, Icon } from "../components";
+import {
+	getNotifDiagnostics,
+	hasNotifDiagnostics,
+	sendTestNotification
+} from "../services/nativeNotification";
 import { getColors } from "../theme";
 import type { FontSizeKey, ThemeMode } from "../theme";
 import React, { Component } from "react";
@@ -8,10 +13,12 @@ import type { TextStyle, ViewStyle } from "react-native";
 export interface SettingsProps {
 	themeMode: ThemeMode;
 	notifEnabled: boolean;
+	mentionsOnly: boolean;
 	soundEnabled: boolean;
 	fontSize: FontSizeKey;
 	onToggleTheme: () => void;
 	onToggleNotif: () => void;
+	onToggleMentionsOnly: () => void;
 	onToggleSound: () => void;
 	onChangeFontSize: (size: FontSizeKey) => void;
 	onBookmarks: () => void;
@@ -19,12 +26,29 @@ export interface SettingsProps {
 	onBack: () => void;
 }
 
+interface SettingsState {
+	diagnostics: string[] | null;
+}
+
 const FONT_SIZES: FontSizeKey[] = ["small", "medium", "large"];
 
 // Settings: theme, font size, notifications, sound, and sign out. Pure
 // presentation — every change is delegated up to App, which owns the state and
 // persistence (Separation of Concerns).
-export default class SettingsScreen extends Component<SettingsProps> {
+export default class SettingsScreen extends Component<SettingsProps, SettingsState> {
+	constructor(props: SettingsProps) {
+		super(props);
+		this.state = { diagnostics: null };
+	}
+
+	// Pulls the native poll service's last-run report. The BB10 device has no adb,
+	// so this is the only in-field visibility into whether background polling works.
+	_loadDiagnostics = async (): Promise<void> => {
+		const diag = await getNotifDiagnostics();
+		const results = diag && diag.lastPoll ? diag.lastPoll.results || [] : [];
+		this.setState({ diagnostics: results.length ? results : ["No poll has run yet."] });
+	};
+
 	_renderToggleRow(
 		label: string,
 		value: boolean,
@@ -43,10 +67,47 @@ export default class SettingsScreen extends Component<SettingsProps> {
 		);
 	}
 
+	// Android-only diagnostics: fire a test notification through the real posting
+	// path, and surface the last background poll's per-account report.
+	_renderDiagnostics(c: ReturnType<typeof getColors>): React.ReactNode {
+		const diagnostics = this.state.diagnostics;
+		return (
+			<View>
+				<TouchableHighlight
+					style={[styles.row, { borderBottomColor: c.border }]}
+					underlayColor={c.messageUnderlay}
+					onPress={sendTestNotification}
+					data-type="btn">
+					<Text style={[styles.rowLabel, { color: c.accent }]}>Send test notification</Text>
+				</TouchableHighlight>
+				<TouchableHighlight
+					style={[styles.row, { borderBottomColor: c.border }]}
+					underlayColor={c.messageUnderlay}
+					onPress={this._loadDiagnostics}
+					data-type="btn">
+					<Text style={[styles.rowLabel, { color: c.accent }]}>Check background polling</Text>
+				</TouchableHighlight>
+				{diagnostics ? (
+					<View style={[styles.rowColumn, { borderBottomColor: c.border }]}>
+						{diagnostics.map(function (line: string, i: number) {
+							return (
+								<Text
+									key={i}
+									style={[styles.diagLine, { color: c.textSecondary }]}>
+									{line}
+								</Text>
+							);
+						})}
+					</View>
+				) : null}
+			</View>
+		);
+	}
+
 	render(): React.ReactNode {
 		const c = getColors();
 		const self = this;
-		const { themeMode, notifEnabled, soundEnabled, fontSize } = this.props;
+		const { themeMode, notifEnabled, mentionsOnly, soundEnabled, fontSize } = this.props;
 
 		return (
 			<View style={{ flex: 1, backgroundColor: c.bg }}>
@@ -94,7 +155,14 @@ export default class SettingsScreen extends Component<SettingsProps> {
 
 					<Text style={[styles.section, { color: c.textTertiary }]}>NOTIFICATIONS</Text>
 					{this._renderToggleRow("Enable notifications", notifEnabled, this.props.onToggleNotif, c)}
+					{this._renderToggleRow(
+						"Mentions & replies only",
+						mentionsOnly,
+						this.props.onToggleMentionsOnly,
+						c
+					)}
 					{this._renderToggleRow("Notification sound", soundEnabled, this.props.onToggleSound, c)}
+					{hasNotifDiagnostics() ? this._renderDiagnostics(c) : null}
 
 					<Text style={[styles.section, { color: c.textTertiary }]}>ACCOUNT</Text>
 					<TouchableHighlight
@@ -136,6 +204,7 @@ const styles = StyleSheet.create<{
 	row: ViewStyle;
 	rowColumn: ViewStyle;
 	rowLabel: TextStyle;
+	diagLine: TextStyle;
 	segment: ViewStyle;
 	segmentItem: ViewStyle;
 	segmentText: TextStyle;
@@ -163,6 +232,7 @@ const styles = StyleSheet.create<{
 		borderBottomWidth: StyleSheet.hairlineWidth
 	},
 	rowLabel: { fontSize: 15 },
+	diagLine: { fontSize: 12, marginBottom: 4, lineHeight: 16 },
 	segment: { flexDirection: "row" },
 	segmentItem: {
 		flex: 1,
