@@ -45,6 +45,51 @@ const VIEWER_FEATURES = {
 	creator_subscriptions_tweet_preview_api_enabled: true
 };
 
+// Feature set the SearchTimeline op requires — mirrors x.com's live web client
+// exactly (39 flags). The op rejects the older DEFAULT_FEATURES set with a 400
+// "missing features" error, so it carries its own set.
+const SEARCH_FEATURES = {
+	rweb_video_screen_enabled: false,
+	rweb_cashtags_enabled: true,
+	profile_label_improvements_pcf_label_in_post_enabled: true,
+	responsive_web_profile_redirect_enabled: false,
+	rweb_tipjar_consumption_enabled: false,
+	verified_phone_label_enabled: false,
+	creator_subscriptions_tweet_preview_api_enabled: true,
+	responsive_web_graphql_timeline_navigation_enabled: true,
+	responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
+	premium_content_api_read_enabled: false,
+	communities_web_enable_tweet_community_results_fetch: true,
+	c9s_tweet_anatomy_moderator_badge_enabled: true,
+	responsive_web_grok_analyze_button_fetch_trends_enabled: false,
+	responsive_web_grok_analyze_post_followups_enabled: true,
+	rweb_cashtags_composer_attachment_enabled: true,
+	responsive_web_jetfuel_frame: true,
+	responsive_web_grok_share_attachment_enabled: true,
+	responsive_web_grok_annotations_enabled: true,
+	articles_preview_enabled: true,
+	responsive_web_edit_tweet_api_enabled: true,
+	rweb_conversational_replies_downvote_enabled: false,
+	graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+	view_counts_everywhere_api_enabled: true,
+	longform_notetweets_consumption_enabled: true,
+	responsive_web_twitter_article_tweet_consumption_enabled: true,
+	content_disclosure_indicator_enabled: true,
+	content_disclosure_ai_generated_indicator_enabled: true,
+	responsive_web_grok_show_grok_translated_post: true,
+	responsive_web_grok_analysis_button_from_backend: true,
+	post_ctas_fetch_enabled: false,
+	freedom_of_speech_not_reach_fetch_enabled: true,
+	standardized_nudges_misinfo: true,
+	tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true,
+	longform_notetweets_rich_text_read_enabled: true,
+	longform_notetweets_inline_media_enabled: false,
+	responsive_web_grok_image_annotation_enabled: true,
+	responsive_web_grok_imagine_annotation_enabled: true,
+	responsive_web_grok_community_note_auto_translation_is_enabled: true,
+	responsive_web_enhance_cards_enabled: false
+};
+
 // Enrichment params for the legacy notifications/all.json endpoint. Mirrors the
 // set x.com's web client sends so the tweets embedded in notifications carry full
 // media, quoted tweets, entities, counts and extended text (tweet_mode=extended).
@@ -249,13 +294,19 @@ export default class XAPI {
 	}
 
 	searchTimeline(query: string, product: string, cursor?: string): Promise<unknown> {
-		return this._gqlGet("SearchTimeline", {
-			rawQuery: query,
-			count: 20,
-			cursor: cursor,
-			querySource: "typed_query",
-			product: product || "Top" // Top | Latest | People | Media
-		});
+		return this._gqlGet(
+			"SearchTimeline",
+			{
+				rawQuery: query,
+				count: 20,
+				cursor: cursor,
+				querySource: "typed_query",
+				product: product || "Top", // Top | Latest | People | Media
+				withGrokTranslatedBio: true,
+				withQuickPromoteEligibilityTweetFields: false
+			},
+			SEARCH_FEATURES
+		);
 	}
 
 	bookmarks(cursor?: string): Promise<unknown> {

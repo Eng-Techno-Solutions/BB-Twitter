@@ -72,7 +72,7 @@ export const X_GQL = {
 	UserTweetsAndReplies: ["E4wA5vo2sjVyvpliUffSCw", "UserTweetsAndReplies"],
 	UserMedia: ["dexO_2tohK86JDudXXd3Wg", "UserMedia"],
 	Likes: ["9s8V6sUI8fZLDiN-REkAxA", "Likes"],
-	SearchTimeline: ["nK1dw4oV3k4w5TdtcAdSww", "SearchTimeline"],
+	SearchTimeline: ["Bcw3RzK-PatNAmbnw54hFw", "SearchTimeline"],
 	Bookmarks: ["QUjXNEsMb9YHZ7uZmMPQug", "Bookmarks"],
 	CreateTweet: ["a1p9RWpkYKBjWv_I3WzS-A", "CreateTweet"],
 	DeleteTweet: ["VaenaVgh5q5ih7kvyVjgtg", "DeleteTweet"],

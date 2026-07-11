@@ -21,6 +21,20 @@ It talks to X's internal web endpoints directly from the device: no backend serv
 - **Dark / light theme** and adjustable font size (small / medium / large)
 - **Hardware keyboard + D-pad** navigation for the Q20
 
+## Screenshots
+
+| Home timeline | Notifications | Messages |
+| :---: | :---: | :---: |
+| ![Home timeline — For You / Following tabs](screenshots/Screen%20Shot%202026-07-11%20at%2017.12.49.png) | ![Notifications feed](screenshots/Screen%20Shot%202026-07-11%20at%2017.13.11.png) | ![Direct message inbox](screenshots/Screen%20Shot%202026-07-11%20at%2017.13.46.png) |
+| **Profile** | **Compose** | **Repost / Quote** |
+| ![User profile](screenshots/Screen%20Shot%202026-07-11%20at%2017.13.51.png) | ![Compose a tweet](screenshots/Screen%20Shot%202026-07-11%20at%2017.13.56.png) | ![Repost or quote menu](screenshots/Screen%20Shot%202026-07-11%20at%2017.14.03.png) |
+
+<p align="center">
+  <img src="screenshots/Screen%20Shot%202026-07-11%20at%2017.14.06.png" alt="Quote compose with embedded tweet" width="320" />
+  <br/>
+  <em>Quoting a tweet — the original renders inline below the composer.</em>
+</p>
+
 ## Platforms
 
 | Target      | How it runs                                              |
